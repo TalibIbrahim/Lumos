@@ -1,6 +1,6 @@
 {
   "name": "lumos",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Local-first desktop app for Tuya smart lights with Apple HomeKit",
   "main": "./out/main/index.js",
   "author": "TalibIbrahim",
