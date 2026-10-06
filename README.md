@@ -344,8 +344,10 @@ From then on, the second computer stops connecting to the lights itself. Its lig
 
 ### Device Shows Offline
 - Verify that the light fixture is powered on at the physical wall switch.
-- **After a power cut**, your router or hotspot may give the lights new addresses. Lumos notices when a light stops answering at its saved address and searches the local network for it, confirming the light with its own key, then saves the new address. To search straight away, choose **Refresh Status** or **Scan Subnet** from the toolbar's more menu.
-- The light's status says why it is offline: **Searching** while Lumos looks for it, **In use elsewhere** when the light answers but another app holds its connection (see below), or **No response** when nothing answers.
+- **After a power cut**, your router or hotspot may give the lights new addresses. Lumos listens for the announcements lights send every few seconds and switches to a light's new address (and protocol version) as soon as it hears one. If it hears nothing, it searches the local network for the light, confirming it with the light's own key, and saves the new address. To search straight away, choose **Refresh Status** or **Scan Subnet** from the toolbar's more menu.
+- The light's status says why it is offline: **Searching** while Lumos looks for it, **In use elsewhere** when the light answers but another app holds its connection (see below), **Key changed** when the light announces itself but rejects the key Lumos has, or **No response** when nothing answers. Open the light for a fuller explanation.
+- **Key changed** happens when a light is removed and added again in the Tuya or Smart Life app, which gives it a new key. Run `python -m tinytuya wizard` again and import the new `devices.json` in **Settings > Device Configuration**.
+- Announcements are not passed between devices on every network. Windows Mobile Hotspot, for example, delivers them to the computer hosting the hotspot but not to other connected computers, and Windows Firewall may ask whether to allow Lumos the first time it listens. The network search works either way.
 - You can also run `python -m tinytuya scan` to list current addresses.
 
 ### Protocol Version Mismatch

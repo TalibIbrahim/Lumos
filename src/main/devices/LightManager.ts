@@ -2,6 +2,7 @@ import { Light } from './Light'
 import { loadDevicesConfig } from '../config'
 import { DEMO_DEVICES } from '../demo'
 import { TinyTuyaDevice, NormalizedLightState } from '../types'
+import { announcements, Announcement } from './discovery'
 
 export class LightManager {
   private lights: Map<string, Light> = new Map()
@@ -18,6 +19,7 @@ export class LightManager {
 
   constructor(onStateBroadcast: (state: NormalizedLightState) => void) {
     this.onStateBroadcast = onStateBroadcast
+    announcements.on('announce', (a: Announcement) => this.lights.get(a.id)?.onAnnounced(a))
   }
 
   /** Marks lights as changed by hand so ambient effects step aside for them. */
@@ -134,6 +136,11 @@ export class LightManager {
       light.connect()
     }
 
+    // Listen for lights announcing themselves, so a light that moved is found
+    // without a scan. Only while this computer talks to real lights.
+    if (!isDemo && !this.remoteMode && this.lights.size > 0) announcements.start()
+    else announcements.stop()
+
     this.onLightsLoaded?.()
 
     if (detectedTable.length > 0) {
@@ -242,6 +249,7 @@ export class LightManager {
   }
 
   public disconnectAll(): void {
+    announcements.stop()
     for (const light of this.lights.values()) {
       light.disconnect()
     }

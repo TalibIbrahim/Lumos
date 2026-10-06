@@ -78,7 +78,7 @@ export interface NormalizedLightState {
   hidden?: boolean
   effect?: string // label of the effect currently shaping this light's output
   /** Why an offline light cannot be reached: still searching, in use by another app, or not answering. */
-  connectionIssue?: 'searching' | 'busy' | 'unreachable'
+  connectionIssue?: 'searching' | 'busy' | 'unreachable' | 'key-mismatch'
 }
 
 export const DEFAULT_DPS: DPSConfig = {

@@ -23,7 +23,7 @@ import { GlassButton } from './ui/GlassButton'
 import { CapsuleSlider } from './ui/CapsuleSlider'
 import { ColorWheel } from './ui/ColorWheel'
 import { NormalizedLightState, ColorHS, DeviceMetadata, RoomGroup } from '../types'
-import { offlineLabel } from '../lib/connection'
+import { offlineHelp, offlineLabel } from '../lib/connection'
 import { springs } from '../lib/constants'
 import { cctToRgb, hsvToRgb } from '../lib/color'
 
@@ -312,6 +312,13 @@ export const LightDetailSheet: React.FC<LightDetailSheetProps> = ({
 
               {/* Scrollable Content Container */}
               <div className="flex-1 overflow-y-auto no-scrollbar min-h-0 pt-4 pb-8 flex flex-col gap-5 text-zinc-100">
+                {/* Why the light cannot be reached, when Lumos knows */}
+                {!online && offlineHelp(light.connectionIssue) && (
+                  <p role="status" className="text-[12px] leading-relaxed text-zinc-300 rounded-2xl bg-white/[0.04] border border-white/[0.07] px-4 py-3">
+                    {offlineHelp(light.connectionIssue)}
+                  </p>
+                )}
+
                 {/* Hero: Large Vertical Brightness Capsule Slider (Centered) */}
                 <div className="flex flex-col items-center justify-center py-1">
                   <CapsuleSlider

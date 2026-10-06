@@ -11,7 +11,11 @@ const net = vi.hoisted(() => ({
   /** Addresses where something accepts TCP but will not talk (another controller holds the bulb). */
   busy: new Set<string>(),
   locateCalls: 0,
-  persisted: [] as Array<{ id: string; ip: string }>
+  persisted: [] as Array<{ id: string; ip: string }>,
+  /** Latest announcement heard from the light, if any. */
+  heard: null as null | { id: string; ip: string; version: string; at: number },
+  /** When set, the light refuses our key even though it is reachable. */
+  wrongKey: false
 }))
 
 vi.mock('tuyapi', async () => {
@@ -28,7 +32,7 @@ vi.mock('tuyapi', async () => {
     }
     async connect(): Promise<boolean> {
       await Promise.resolve()
-      if (this.device.ip !== net.bulbAt) throw new Error('connection timed out')
+      if (this.device.ip !== net.bulbAt || net.wrongKey) throw new Error('connection timed out')
       this.connected = true
       this.emit('connected')
       return true
@@ -57,7 +61,8 @@ vi.mock('../main/devices/discovery', () => ({
   locateDevice: vi.fn(async () => {
     net.locateCalls++
     return net.bulbAt
-  })
+  }),
+  announcements: { get: vi.fn(() => net.heard), on: vi.fn(), start: vi.fn(), stop: vi.fn() }
 }))
 
 vi.mock('../main/config', () => ({
@@ -83,6 +88,8 @@ describe('Finding lights whose address changed', () => {
     net.busy.clear()
     net.locateCalls = 0
     net.persisted = []
+    net.heard = null
+    net.wrongKey = false
   })
   afterEach(() => vi.useRealTimers())
 
@@ -153,6 +160,38 @@ describe('Finding lights whose address changed', () => {
       net.locateCalls++
       return net.bulbAt
     })
+  })
+
+  it('switches to the address a light announces and connects straight away', async () => {
+    net.bulbAt = '192.0.2.77'
+    const light = new Light(device)
+    await light.connect()
+    await settle()
+    expect(light.isConnected).toBe(false)
+
+    light.onAnnounced({ id: device.id, ip: '192.0.2.77', version: '3.5', at: Date.now() })
+    await settle(10)
+    expect(light.ip).toBe('192.0.2.77')
+    expect(light.isConnected).toBe(true)
+    light.disconnect()
+  })
+
+  it('reports a changed key when the light announces itself but will not talk', async () => {
+    const { locateDevice } = await import('../main/devices/discovery')
+    net.bulbAt = device.ip // reachable at the saved address...
+    net.wrongKey = true // ...but our key no longer works
+    net.heard = { id: device.id, ip: device.ip, version: '3.5', at: Date.now() }
+    const before = net.locateCalls
+    vi.mocked(locateDevice).mockClear()
+
+    const light = new Light(device)
+    await light.connect()
+    await settle(2000)
+    await settle(100)
+    expect(light.getState().connectionIssue).toBe('key-mismatch')
+    // It knows where the light is, so it does not scan the network
+    expect(net.locateCalls).toBe(before)
+    light.disconnect()
   })
 
   it('Refresh searches straight away', async () => {

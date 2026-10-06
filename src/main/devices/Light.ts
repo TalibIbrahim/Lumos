@@ -12,10 +12,10 @@ import {
 import { latencyTracker } from '../latency'
 import { updatePersistedDeviceIp } from '../config'
 import { LightOutput, OutputField, changedFields, quantize } from '../effects/output'
-import { claimAddress, clearScanCache, locateDevice, probeTcp, releaseAddress } from './discovery'
+import { Announcement, announcements, claimAddress, clearScanCache, locateDevice, probeTcp, releaseAddress } from './discovery'
 
 /** Why an offline light cannot be reached, shown in the UI. */
-export type ConnectionIssue = 'searching' | 'busy' | 'unreachable'
+export type ConnectionIssue = 'searching' | 'busy' | 'unreachable' | 'key-mismatch'
 
 export class Light extends EventEmitter {
   public id: string
@@ -375,6 +375,16 @@ export class Light extends EventEmitter {
     if (this.isDestroyed || this.isDemo || this.isConnected) return
     this.consecutiveFailures++
     const ip = this.ip
+    // A light that is announcing itself has nothing connected to it (lights go
+    // quiet while connected). If it announces at this address and still will
+    // not talk to us, its key or protocol does not match what we have.
+    const heard = announcements.get(this.id)
+    if (heard && heard.ip === ip && this.consecutiveFailures >= 2) {
+      this.setConnectionIssue('key-mismatch')
+      this.scheduleReconnect()
+      return
+    }
+
     const answers = ip ? await probeTcp(ip) : false
     if (this.isConnected || this.isDestroyed) return
     this.setConnectionIssue(answers ? 'busy' : 'unreachable')
@@ -419,6 +429,33 @@ export class Light extends EventEmitter {
     } finally {
       this.rediscovering = false
     }
+  }
+
+  /**
+   * A light announced itself on the network. If it is at a different address,
+   * or speaks a different protocol version than configured, switch to that
+   * and connect straight away.
+   */
+  public onAnnounced(a: Announcement): void {
+    if (this.isDemo || this.isDestroyed || this.isConnected) return
+    let changed = false
+    if (a.version && a.version !== this.version) {
+      console.log(`[Lumos Light ${this.name}] Announces protocol ${a.version} (configured ${this.version})`)
+      this.version = a.version
+      changed = true
+    }
+    if (a.ip !== this.ip) {
+      console.log(`[Lumos Light ${this.name}] Announces new address ${a.ip} (was ${this.ip || 'unknown'})`)
+      this.ip = a.ip
+      changed = true
+    }
+    if (!changed) return
+    this.clearRetryTimer()
+    this.retryBackoffMs = 1000
+    this.consecutiveFailures = 0
+    this.setConnectionIssue(null)
+    this.initTuyaClient()
+    void this.connect()
   }
 
   private setConnectionIssue(issue: ConnectionIssue | null): void {
