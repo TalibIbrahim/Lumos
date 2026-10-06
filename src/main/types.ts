@@ -77,6 +77,8 @@ export interface NormalizedLightState {
   order?: number
   hidden?: boolean
   effect?: string // label of the effect currently shaping this light's output
+  /** Why an offline light cannot be reached: still searching, in use by another app, or not answering. */
+  connectionIssue?: 'searching' | 'busy' | 'unreachable'
 }
 
 export const DEFAULT_DPS: DPSConfig = {
@@ -214,6 +216,42 @@ export interface EffectActionResult {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   result?: any
   error?: string
+}
+
+// --- Control from other computers ---
+
+export interface RemoteStateData {
+  role: 'off' | 'hub' | 'client'
+  computerName: string
+  hub: {
+    running: boolean
+    error: string
+    port: number
+    addresses: string[]
+    code: string | null
+    codeExpiresAt: number | null
+    clients: Array<{ id: string; name: string; addedAt: number; connected: boolean }>
+  }
+  client: {
+    hubName: string
+    address: string
+    state: 'connecting' | 'connected' | 'disconnected'
+    error: string
+  } | null
+}
+
+export interface RemoteActionResult<T = unknown> {
+  ok: boolean
+  state?: RemoteStateData
+  result?: T
+  error?: string
+}
+
+export interface FoundHubData {
+  id: string
+  name: string
+  address: string
+  port: number
 }
 
 // --- Energy (all figures are estimates) ---

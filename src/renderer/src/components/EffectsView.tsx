@@ -30,13 +30,15 @@ export interface EffectsViewProps {
   lights: NormalizedLightState[]
   isDemoMode: boolean
   onToggle: (id: string, on: boolean) => void
+  /** Name of the computer the effects run on, when this one controls another computer's lights. */
+  runningOn?: string | null
 }
 
 /**
  * Effects page: one card per effect with its status and an on/off toggle.
  * Tapping a card opens its settings sheet.
  */
-export const EffectsView: React.FC<EffectsViewProps> = ({ snapshot, lights, isDemoMode, onToggle }) => {
+export const EffectsView: React.FC<EffectsViewProps> = ({ snapshot, lights, isDemoMode, onToggle, runningOn }) => {
   const reduceMotion = useReducedMotion()
   const [openId, setOpenId] = useState<string | null>(null)
   const [safetyOpen, setSafetyOpen] = useState(false)
@@ -56,6 +58,12 @@ export const EffectsView: React.FC<EffectsViewProps> = ({ snapshot, lights, isDe
 
   return (
     <div className="flex flex-col gap-6">
+      {runningOn && (
+        <p className="text-xs text-zinc-400 px-1">
+          These effects run on {runningOn}. Music and Album color follow what plays on that computer.
+        </p>
+      )}
+
       {noLights && (
         <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] text-xs text-zinc-400">
           <LightbulbOff className="w-4 h-4 text-zinc-500 flex-shrink-0" />

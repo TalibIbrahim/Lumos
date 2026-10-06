@@ -158,6 +158,12 @@ export class EffectManager extends EventEmitter {
     this.scheduleChanged()
   }
 
+  /** Stops every effect without changing whether it is switched on. */
+  public suspendAll(): void {
+    for (const effect of this.effects.values()) effect.stop()
+    this.scheduleChanged()
+  }
+
   public async shutdown(): Promise<void> {
     this.shuttingDown = true
     for (const effect of this.effects.values()) effect.stop()

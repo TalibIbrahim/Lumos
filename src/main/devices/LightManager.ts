@@ -8,6 +8,8 @@ export class LightManager {
   private onStateBroadcast: (state: NormalizedLightState) => void
   private isDemoMode = false
   private isInitialized = false
+  /** While this computer controls another computer's lights, it holds no bulb connections. */
+  private remoteMode = false
 
   /** Called after the set of lights is created or replaced. */
   public onLightsLoaded?: () => void
@@ -24,6 +26,16 @@ export class LightManager {
     if (ids.length > 0) this.onManualChange?.(ids)
   }
 
+  public setRemoteMode(on: boolean): void {
+    if (this.remoteMode === on) return
+    this.remoteMode = on
+    if (this.isInitialized) this.reloadDevices()
+  }
+
+  public isRemoteMode(): boolean {
+    return this.remoteMode
+  }
+
   public markAllManual(): void {
     this.markManual(Array.from(this.lights.keys()))
   }
@@ -31,6 +43,11 @@ export class LightManager {
   public async init(isDemo: boolean = false): Promise<void> {
     this.isDemoMode = isDemo
     this.isInitialized = true
+
+    if (this.remoteMode) {
+      this.loadDevices([], false)
+      return
+    }
 
     if (this.isDemoMode) {
       console.log('[Lumos LightManager] Initializing in DEMO mode with simulated accessories')
@@ -57,7 +74,9 @@ export class LightManager {
   }
 
   public reloadDevices(): void {
-    if (this.isDemoMode) {
+    if (this.remoteMode) {
+      this.loadDevices([], false)
+    } else if (this.isDemoMode) {
       this.loadDevices(DEMO_DEVICES, true)
     } else {
       const devices = loadDevicesConfig()
@@ -124,6 +143,13 @@ export class LightManager {
     } else {
       console.warn('[Lumos] No lights loaded.')
     }
+  }
+
+  /** Retries every offline light now, searching for any whose address changed. */
+  public async reconnectOffline(): Promise<number> {
+    const offline = Array.from(this.lights.values()).filter((l) => !l.isConnected && !l.isDemo)
+    await Promise.all(offline.map((l) => l.reconnectNow().catch(() => {})))
+    return offline.length
   }
 
   public getAllStates(): NormalizedLightState[] {

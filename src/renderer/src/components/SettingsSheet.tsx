@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { GlassSurface } from './ui/GlassSurface'
 import { GlassButton } from './ui/GlassButton'
+import { RemoteSettings } from './RemoteSettings'
 import { springs } from '../lib/constants'
 import { HomeKitInfo, WebhookInfo, UpdateStatus } from '../types'
 
@@ -557,6 +558,9 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, o
                       </div>
                     </div>
                   </div>
+
+                  {/* Control from other computers */}
+                  <RemoteSettings isOpen={isOpen} onConnected={onRefreshDevices} />
 
                   {/* Group 4: Device Configuration */}
                   <div className="flex flex-col gap-2">

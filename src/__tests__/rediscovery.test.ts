@@ -1,0 +1,173 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+
+/**
+ * Lights that come back at a different address (for example after a power
+ * cut) are found again, and lights held by another app are reported as such.
+ */
+
+const net = vi.hoisted(() => ({
+  /** Address the bulb is really at; connections elsewhere fail. */
+  bulbAt: '192.0.2.20',
+  /** Addresses where something accepts TCP but will not talk (another controller holds the bulb). */
+  busy: new Set<string>(),
+  locateCalls: 0,
+  persisted: [] as Array<{ id: string; ip: string }>
+}))
+
+vi.mock('tuyapi', async () => {
+  const { EventEmitter } = await import('events')
+  class FakeTuya extends EventEmitter {
+    device: { ip?: string }
+    connected = false
+    constructor(opts: { ip?: string }) {
+      super()
+      this.device = { ip: opts.ip }
+    }
+    isConnected(): boolean {
+      return this.connected
+    }
+    async connect(): Promise<boolean> {
+      await Promise.resolve()
+      if (this.device.ip !== net.bulbAt) throw new Error('connection timed out')
+      this.connected = true
+      this.emit('connected')
+      return true
+    }
+    async get(): Promise<unknown> {
+      return { dps: { '20': true } }
+    }
+    async set(): Promise<boolean> {
+      return true
+    }
+    async find(): Promise<boolean> {
+      return true
+    }
+    disconnect(): void {
+      this.connected = false
+    }
+  }
+  return { default: FakeTuya }
+})
+
+vi.mock('../main/devices/discovery', () => ({
+  claimAddress: vi.fn(),
+  releaseAddress: vi.fn(),
+  clearScanCache: vi.fn(),
+  probeTcp: vi.fn(async (ip: string) => net.busy.has(ip) || ip === net.bulbAt),
+  locateDevice: vi.fn(async () => {
+    net.locateCalls++
+    return net.bulbAt
+  })
+}))
+
+vi.mock('../main/config', () => ({
+  updatePersistedDeviceIp: (id: string, ip: string) => net.persisted.push({ id, ip }),
+  loadDevicesConfig: () => []
+}))
+
+vi.mock('../main/devices/arp', () => ({ resolveIpFromMac: () => null }))
+
+import { Light } from '../main/devices/Light'
+
+const device = { id: 'moved-light', name: 'Right', key: '0123456789abcdef', ip: '192.0.2.207', version: '3.5' }
+
+async function settle(ms = 0): Promise<void> {
+  for (let i = 0; i < 20; i++) await Promise.resolve()
+  if (ms) await vi.advanceTimersByTimeAsync(ms)
+}
+
+describe('Finding lights whose address changed', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    net.bulbAt = '192.0.2.20'
+    net.busy.clear()
+    net.locateCalls = 0
+    net.persisted = []
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('searches after repeated failures, connects at the new address, and saves it', async () => {
+    const light = new Light(device)
+    await light.connect()
+    await settle()
+    expect(light.isConnected).toBe(false)
+    expect(net.locateCalls).toBe(0) // one failure is not enough to search
+
+    await settle(2000) // the retry fails too, which triggers the search
+    await settle(100)
+    expect(net.locateCalls).toBe(1)
+    expect(light.ip).toBe('192.0.2.20')
+    expect(light.isConnected).toBe(true)
+    expect(net.persisted).toContainEqual({ id: 'moved-light', ip: '192.0.2.20' })
+    expect(light.getState().connectionIssue).toBeUndefined()
+    light.disconnect()
+  })
+
+  it('reports a light that answers but will not talk as in use elsewhere', async () => {
+    net.bulbAt = '192.0.2.99' // not where we look, and not found by the search either
+    net.busy.add(device.ip)
+    const { locateDevice } = await import('../main/devices/discovery')
+    vi.mocked(locateDevice).mockResolvedValueOnce(null)
+
+    const light = new Light(device)
+    await light.connect()
+    await settle()
+    expect(light.getState().connectionIssue).toBe('busy')
+    expect(light.getState().online).toBe(false)
+    light.disconnect()
+  })
+
+  it('reports a light that does not answer at all as not responding', async () => {
+    net.bulbAt = '192.0.2.99'
+    const { locateDevice } = await import('../main/devices/discovery')
+    vi.mocked(locateDevice).mockResolvedValue(null)
+
+    const light = new Light(device)
+    await light.connect()
+    await settle()
+    expect(light.getState().connectionIssue).toBe('unreachable')
+    vi.mocked(locateDevice).mockImplementation(async () => {
+      net.locateCalls++
+      return net.bulbAt
+    })
+    light.disconnect()
+  })
+
+  it('does not search the network over and over while a light stays missing', async () => {
+    net.bulbAt = '192.0.2.99'
+    const { locateDevice } = await import('../main/devices/discovery')
+    vi.mocked(locateDevice).mockImplementation(async () => {
+      net.locateCalls++
+      return null
+    })
+
+    const light = new Light(device)
+    await light.connect()
+    await settle(60000) // a minute of retries
+    const afterOneMinute = net.locateCalls
+    expect(afterOneMinute).toBeLessThanOrEqual(2)
+    await settle(60000)
+    expect(net.locateCalls - afterOneMinute).toBeLessThanOrEqual(1)
+    light.disconnect()
+    vi.mocked(locateDevice).mockImplementation(async () => {
+      net.locateCalls++
+      return net.bulbAt
+    })
+  })
+
+  it('Refresh searches straight away', async () => {
+    net.bulbAt = '192.0.2.99'
+    const light = new Light(device)
+    await light.connect()
+    await settle()
+    const before = net.locateCalls
+
+    net.bulbAt = '192.0.2.31' // the light comes back elsewhere
+    await light.reconnectNow()
+    await settle(50)
+    expect(net.locateCalls).toBe(before + 1)
+    expect(light.isConnected).toBe(true)
+    expect(light.ip).toBe('192.0.2.31')
+    light.disconnect()
+  })
+})

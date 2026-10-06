@@ -11,7 +11,10 @@ import {
   EffectPausedNotice,
   EffectActionResult,
   EnergyRangeName,
-  EnergyReportData
+  EnergyReportData,
+  RemoteStateData,
+  RemoteActionResult,
+  FoundHubData
 } from '../main/types'
 
 export interface HomeKitInfo {
@@ -65,6 +68,7 @@ export interface LumosAPI {
   setGroupBrightness: (deviceIds: string[], value: number) => Promise<boolean[]>
   setGroupColorTemp: (deviceIds: string[], value: number) => Promise<boolean[]>
   triggerFlash: (targetId?: string, roomId?: string, count?: number) => Promise<boolean>
+  reconnectLights: () => Promise<number>
   getLatencyStats: () => Promise<{ count: number; min: number; max: number; avg: number; p50: number; p95: number }>
 
   // Subscriptions
@@ -123,6 +127,16 @@ export interface LumosAPI {
   resetEnergy: () => Promise<boolean>
   exportEnergy: () => Promise<{ canceled: boolean; success?: boolean; error?: string }>
 
+  // Control from other computers
+  getRemoteState: () => Promise<RemoteStateData>
+  setRemoteHub: (on: boolean) => Promise<RemoteActionResult>
+  newRemoteCode: () => Promise<RemoteActionResult>
+  removeRemoteClient: (id: string) => Promise<RemoteActionResult>
+  discoverRemoteHubs: () => Promise<RemoteActionResult<FoundHubData[]>>
+  pairRemoteHub: (address: string, port: number, code: string) => Promise<RemoteActionResult>
+  leaveRemoteHub: () => Promise<RemoteActionResult>
+  onRemoteStatus: (callback: (state: RemoteStateData) => void) => () => void
+
   // Window & System
   getLaunchAtLogin: () => Promise<boolean>
   setLaunchAtLogin: (enabled: boolean) => Promise<boolean>
@@ -163,6 +177,7 @@ const api: LumosAPI = {
   triggerFlash: (targetId?: string, roomId?: string, count?: number) =>
     ipcRenderer.invoke('trigger-flash', targetId, roomId, count),
   getLatencyStats: () => ipcRenderer.invoke('get-latency-stats'),
+  reconnectLights: () => ipcRenderer.invoke('reconnect-lights'),
 
   onUpdate: (callback: (state: NormalizedLightState) => void): (() => void) => {
     const subscription = (_event: IpcRendererEvent, state: NormalizedLightState): void => {
@@ -256,6 +271,19 @@ const api: LumosAPI = {
   setEnergyPrice: (price) => ipcRenderer.invoke('energy-set-price', price),
   resetEnergy: () => ipcRenderer.invoke('energy-reset'),
   exportEnergy: () => ipcRenderer.invoke('energy-export'),
+
+  getRemoteState: () => ipcRenderer.invoke('remote-get-state'),
+  setRemoteHub: (on) => ipcRenderer.invoke('remote-set-hub', on),
+  newRemoteCode: () => ipcRenderer.invoke('remote-new-code'),
+  removeRemoteClient: (id) => ipcRenderer.invoke('remote-remove-client', id),
+  discoverRemoteHubs: () => ipcRenderer.invoke('remote-discover'),
+  pairRemoteHub: (address, port, code) => ipcRenderer.invoke('remote-pair', address, port, code),
+  leaveRemoteHub: () => ipcRenderer.invoke('remote-leave'),
+  onRemoteStatus: (callback) => {
+    const sub = (_event: IpcRendererEvent, state: RemoteStateData): void => callback(state)
+    ipcRenderer.on('remote-status', sub)
+    return () => ipcRenderer.removeListener('remote-status', sub)
+  },
 
   getLaunchAtLogin: (): Promise<boolean> => ipcRenderer.invoke('get-launch-at-login'),
   setLaunchAtLogin: (enabled: boolean): Promise<boolean> =>

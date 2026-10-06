@@ -14,11 +14,15 @@ import { NormalizedLightState } from './types'
 import { EffectManager } from './effects/EffectManager'
 import { registerEffects } from './effects/registry'
 import { EnergyTracker } from './energy/EnergyTracker'
+import { RemoteManager } from './remote/RemoteManager'
+import { setupRemoteIPC } from './remote/remoteIpc'
+import { isForwarding } from './remote/registry'
 
 let mainWindow: BrowserWindow | null = null
 let lightManager: LightManager | null = null
 let effectManager: EffectManager | null = null
 let energyTracker: EnergyTracker | null = null
+let remoteManager: RemoteManager | null = null
 let isQuitting = false
 let cleanupDone = false
 
@@ -105,9 +109,11 @@ app.whenReady().then(async () => {
       color: state.color,
       mode: state.mode
     })
-    if (mainWindow && !mainWindow.isDestroyed()) {
+    // While this computer controls another computer's lights, the window shows those instead
+    if (mainWindow && !mainWindow.isDestroyed() && !isForwarding()) {
       mainWindow.webContents.send('light-update', state)
     }
+    remoteManager?.onLocalEvent('light-update', state)
   })
 
   // Effects: the compositor owns every write to the bulbs from here on
@@ -122,15 +128,43 @@ app.whenReady().then(async () => {
   webhookServer.setEffectManager(effectManager)
   homeKitManager.setEffectManager(effectManager)
 
+  // Control from other computers: one computer keeps the bulbs, others control them through it
+  const sendToWindow = (channel: string, payload: unknown): void => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
+  }
+  remoteManager = new RemoteManager(app.getPath('userData'), {
+    enterClient: () => {
+      effectManager?.suspendAll()
+      homeKitManager.stop()
+      lightManager?.setRemoteMode(true)
+    },
+    leaveClient: async () => {
+      lightManager?.setRemoteMode(false)
+      await effectManager?.startEnabled()
+      if (!isDemo && lightManager) {
+        await homeKitManager.init(lightManager).catch((err) => console.error('[Lumos] HomeKit:', err))
+      }
+    }
+  })
+  remoteManager.on('event', (channel: string, payload: unknown) => sendToWindow(channel, payload))
+  remoteManager.on('status', (status: unknown) => sendToWindow('remote-status', status))
+  effectManager.on('snapshot', (s) => remoteManager?.onLocalEvent('effects-update', s))
+  effectManager.on('paused', (n) => remoteManager?.onLocalEvent('effect-paused', n))
+  effectManager.on('live', (l) => remoteManager?.onLocalEvent('effects-live', l))
+  if (remoteManager.isClient()) lightManager.setRemoteMode(true)
+
   // Initialize Lumos Persistent Store & Automations
   lumosStore.init(lightManager, () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow && !mainWindow.isDestroyed() && !isForwarding()) {
       mainWindow.webContents.send('store-update', lumosStore.getData())
     }
+    remoteManager?.onLocalEvent('store-update', lumosStore.getData())
   })
 
   // Setup IPC handlers
   setupIPC(lightManager, homeKitManager, () => mainWindow, effectManager, energyTracker)
+  setupRemoteIPC(remoteManager)
+  void remoteManager.start()
 
   // Setup Auto-Updater
   setupAutoUpdater(() => mainWindow)
@@ -153,6 +187,9 @@ app.whenReady().then(async () => {
       }
 
       energyTracker?.start()
+
+      // A computer controlling another computer's lights runs effects and HomeKit there, not here
+      if (remoteManager?.isClient()) return
 
       try {
         await effectManager?.startEnabled()
@@ -198,6 +235,7 @@ app.on('before-quit', (event) => {
       console.warn('[Lumos] Error stopping effects:', err)
     }
     energyTracker?.stop()
+    remoteManager?.stop()
     lumosStore.destroy()
     webhookServer.stop()
     homeKitManager.stop()

@@ -2,6 +2,7 @@ import { Tray, Menu, nativeImage, NativeImage, BrowserWindow, app } from 'electr
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { LightManager } from './devices/LightManager'
+import { invokeAuto } from './remote/registry'
 
 let tray: Tray | null = null
 let rebuildMenu: (() => void) | null = null
@@ -84,13 +85,14 @@ export function createTray(mainWindow: BrowserWindow, lightManager: LightManager
       {
         label: 'All On',
         click: (): void => {
-          lightManager.setAll(true)
+          // Goes to the other computer when this one controls its lights
+          void invokeAuto('set-all', [true]).catch(() => lightManager.setAll(true))
         }
       },
       {
         label: 'All Off',
         click: (): void => {
-          lightManager.setAll(false)
+          void invokeAuto('set-all', [false]).catch(() => lightManager.setAll(false))
         }
       },
       { type: 'separator' },

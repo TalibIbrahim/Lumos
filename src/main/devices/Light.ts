@@ -12,6 +12,10 @@ import {
 import { latencyTracker } from '../latency'
 import { updatePersistedDeviceIp } from '../config'
 import { LightOutput, OutputField, changedFields, quantize } from '../effects/output'
+import { claimAddress, clearScanCache, locateDevice, probeTcp, releaseAddress } from './discovery'
+
+/** Why an offline light cannot be reached, shown in the UI. */
+export type ConnectionIssue = 'searching' | 'busy' | 'unreachable'
 
 export class Light extends EventEmitter {
   public id: string
@@ -36,6 +40,13 @@ export class Light extends EventEmitter {
   private retryBackoffMs = 1000
   private readonly maxBackoffMs = 15000
   private isDestroyed = false
+
+  // Finding a light whose address changed (see discovery.ts)
+  public connectionIssue: ConnectionIssue | null = null
+  private consecutiveFailures = 0
+  private rediscoverRounds = 0
+  private lastRediscoverAt = 0
+  private rediscovering = false
 
   // Command coalescing queue
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -203,6 +214,10 @@ export class Light extends EventEmitter {
         this.retryBackoffMs = 1000
         this.clearRetryTimer()
         this.lastSeen = Date.now()
+        this.consecutiveFailures = 0
+        this.rediscoverRounds = 0
+        this.connectionIssue = null
+        if (this.ip) claimAddress(this.ip, this.id)
 
         // Persist verified working IP so subsequent launches connect immediately
         if (this.ip && !this.isDemo) {
@@ -241,6 +256,7 @@ export class Light extends EventEmitter {
 
       this.tuya.on('disconnected', () => {
         this.isConnected = false
+        releaseAddress(this.ip, this.id)
         console.log(`[Lumos Light ${this.name}] Disconnected.`)
 
         this.emitState()
@@ -331,15 +347,92 @@ export class Light extends EventEmitter {
       }
 
       if (!this.ip) {
-        this.scheduleReconnect()
+        await this.handleConnectFailure()
         return
       }
 
       this.connectAttemptsWithCurrentVersion++
       await this.tuya.connect()
     } catch {
-      this.scheduleReconnect()
+      await this.handleConnectFailure()
     }
+  }
+
+  /**
+   * Records a failed attempt and works out why: nothing answers at the saved
+   * address, or something answers but will not talk to us, which usually
+   * means another app (such as Lumos on another computer) holds the light's
+   * only local connection. After repeated failures it searches the local
+   * network for the light, in case its address changed.
+   */
+  private async handleConnectFailure(): Promise<void> {
+    if (this.isDestroyed || this.isDemo || this.isConnected) return
+    this.consecutiveFailures++
+    const ip = this.ip
+    const answers = ip ? await probeTcp(ip) : false
+    if (this.isConnected || this.isDestroyed) return
+    this.setConnectionIssue(answers ? 'busy' : 'unreachable')
+
+    const waitMs = this.rediscoverRounds === 0 ? 0 : Math.min(300000, 60000 * 2 ** (this.rediscoverRounds - 1))
+    if (this.consecutiveFailures >= 2 && Date.now() - this.lastRediscoverAt >= waitMs) {
+      const moved = await this.rediscover()
+      if (moved) {
+        void this.connect()
+        return
+      }
+    }
+    this.scheduleReconnect()
+  }
+
+  /** Searches the local network for this light. Returns true if it was found at a new address. */
+  private async rediscover(): Promise<boolean> {
+    if (this.rediscovering || this.isDemo) return false
+    this.rediscovering = true
+    this.lastRediscoverAt = Date.now()
+    this.rediscoverRounds++
+    const before = this.connectionIssue
+    this.setConnectionIssue('searching')
+    try {
+      const found = await locateDevice({ id: this.id, key: this.key, version: this.version })
+      if (this.isDestroyed || this.isConnected) return false
+      if (found && found !== this.ip) {
+        console.log(`[Lumos Light ${this.name}] Found at new address ${found} (was ${this.ip || 'unknown'})`)
+        this.ip = found
+        updatePersistedDeviceIp(this.id, found)
+        this.initTuyaClient()
+        this.retryBackoffMs = 1000
+        this.consecutiveFailures = 0
+        this.setConnectionIssue(null)
+        return true
+      }
+      this.setConnectionIssue(before === 'searching' || before === null ? 'unreachable' : before)
+      return false
+    } catch {
+      this.setConnectionIssue(before ?? 'unreachable')
+      return false
+    } finally {
+      this.rediscovering = false
+    }
+  }
+
+  private setConnectionIssue(issue: ConnectionIssue | null): void {
+    if (this.connectionIssue === issue) return
+    this.connectionIssue = issue
+    this.emitState()
+  }
+
+  /** Tries again straight away, searching for the light if it is not at its saved address. */
+  public async reconnectNow(): Promise<void> {
+    if (this.isConnected || this.isDemo || this.isDestroyed) return
+    this.clearRetryTimer()
+    this.retryBackoffMs = 1000
+    this.rediscoverRounds = 0
+    this.lastRediscoverAt = 0
+    // One more failure triggers a fresh search
+    this.consecutiveFailures = Math.max(this.consecutiveFailures, 1)
+    clearScanCache()
+    if (this.ip) this.initTuyaClient()
+    await this.connect()
   }
 
   private scheduleReconnect(): void {
@@ -393,11 +486,11 @@ export class Light extends EventEmitter {
           await this.tuya.connect()
         } else {
           this.retryBackoffMs = Math.min(this.retryBackoffMs * 2, this.maxBackoffMs)
-          this.scheduleReconnect()
+          await this.handleConnectFailure()
         }
       } catch {
         this.retryBackoffMs = Math.min(this.retryBackoffMs * 2, this.maxBackoffMs)
-        this.scheduleReconnect()
+        await this.handleConnectFailure()
       }
     }, this.retryBackoffMs)
   }
@@ -545,7 +638,8 @@ export class Light extends EventEmitter {
       room: this.room,
       order: this.order,
       hidden: this.hidden,
-      effect: this.activeEffect
+      effect: this.activeEffect,
+      connectionIssue: this.isConnected ? undefined : (this.connectionIssue ?? undefined)
     }
   }
 
@@ -828,6 +922,7 @@ export class Light extends EventEmitter {
   public disconnect(): void {
     this.isDestroyed = true
     this.clearRetryTimer()
+    releaseAddress(this.ip, this.id)
     if (!this.isDemo) {
       try {
         if (this.tuya) {

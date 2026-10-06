@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { GlassButton } from './ui/GlassButton'
 import { NormalizedLightState } from '../types'
+import { offlineLabel } from '../lib/connection'
 import { getTileGlowStyle } from '../lib/color'
 import { springs } from '../lib/constants'
 
@@ -45,6 +46,7 @@ const LightTileComponent: React.FC<LightTileProps> = ({
   isFocused = false
 }) => {
   const { id, name, online, power, brightness, colorTemp, mode, color, customName } = light
+  const offlineText = offlineLabel(light.connectionIssue)
   const displayName = customName || name
 
   // Direct manipulation drag state
@@ -206,7 +208,7 @@ const LightTileComponent: React.FC<LightTileProps> = ({
         ref={tileRef}
         role="switch"
         aria-checked={power}
-        aria-label={`${displayName}, ${online ? (power ? `On, ${effectiveBri} percent brightness` : 'Off') : 'No response'}`}
+        aria-label={`${displayName}, ${online ? (power ? `On, ${effectiveBri} percent brightness` : 'Off') : offlineText}`}
         data-light-id={id}
         tabIndex={online ? 0 : -1}
         onKeyDown={handleKeyDown}
@@ -326,7 +328,7 @@ const LightTileComponent: React.FC<LightTileProps> = ({
                 </GlassButton>
               ) : (
                 <span className="text-[10px] font-medium text-rose-400/90 bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20">
-                  No response
+                  {offlineText}
                 </span>
               )}
             </div>
@@ -356,7 +358,7 @@ const LightTileComponent: React.FC<LightTileProps> = ({
               }`}
             >
               {!online
-                ? 'No response'
+                ? offlineText
                 : power
                 ? `${effectiveBri}% · ${modeLabel}`
                 : 'Off'}

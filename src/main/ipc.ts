@@ -1,4 +1,5 @@
-import { ipcMain, BrowserWindow, app, dialog, shell } from 'electron'
+import { BrowserWindow, app, dialog, shell } from 'electron'
+import { handle, on, isForwarding, invokeAuto } from './remote/registry'
 import { readFileSync } from 'fs'
 import { LightManager } from './devices/LightManager'
 import { HomeKitManager } from './homekit'
@@ -51,115 +52,119 @@ export function setupIPC(
   }
 
   // Light control IPC Handlers
-  ipcMain.handle('get-status', async () => {
+  handle('get-status', async () => {
     return lightManager.getAllStates()
   })
 
-  ipcMain.handle('toggle-light', async (_event, id: string) => {
+  handle('toggle-light', async (_event, id: string) => {
     if (typeof id !== 'string' || !id) return false
     manual([id])
     return lightManager.toggleLight(id)
   })
 
-  ipcMain.handle('set-power', async (_event, id: string, on: boolean) => {
+  handle('set-power', async (_event, id: string, on: boolean) => {
     if (typeof id !== 'string' || typeof on !== 'boolean') return false
     manual([id])
     return lightManager.setPower(id, on)
   })
 
-  ipcMain.handle('set-brightness', async (_event, id: string, value: number) => {
+  handle('set-brightness', async (_event, id: string, value: number) => {
     if (typeof id !== 'string' || typeof value !== 'number') return false
     manual([id])
     return lightManager.setBrightness(id, value)
   })
 
-  ipcMain.on('stream-brightness', (_event, id: string, value: number) => {
+  on('stream-brightness', (_event, id: string, value: number) => {
     if (typeof id === 'string' && typeof value === 'number') {
       manual([id])
       lightManager.setBrightness(id, value)
     }
   })
 
-  ipcMain.handle('set-color-temp', async (_event, id: string, value: number) => {
+  handle('set-color-temp', async (_event, id: string, value: number) => {
     if (typeof id !== 'string' || typeof value !== 'number') return false
     manual([id])
     return lightManager.setColorTemp(id, value)
   })
 
-  ipcMain.on('stream-color-temp', (_event, id: string, value: number) => {
+  on('stream-color-temp', (_event, id: string, value: number) => {
     if (typeof id === 'string' && typeof value === 'number') {
       manual([id])
       lightManager.setColorTemp(id, value)
     }
   })
 
-  ipcMain.handle('get-latency-stats', async () => {
+  handle('reconnect-lights', async () => {
+    return lightManager.reconnectOffline()
+  })
+
+  handle('get-latency-stats', async () => {
     return latencyTracker.getStats()
   })
 
-  ipcMain.handle('set-color', async (_event, id: string, color: ColorHS) => {
+  handle('set-color', async (_event, id: string, color: ColorHS) => {
     if (typeof id !== 'string' || !color) return false
     manual([id])
     return lightManager.setColor(id, color.h, color.s, color.v)
   })
 
-  ipcMain.handle('set-work-mode', async (_event, id: string, mode: 'white' | 'colour' | 'scene' | 'music') => {
+  handle('set-work-mode', async (_event, id: string, mode: 'white' | 'colour' | 'scene' | 'music') => {
     if (typeof id !== 'string') return false
     manual([id])
     return lightManager.setWorkMode(id, mode)
   })
 
-  ipcMain.handle('set-scene', async (_event, id: string, sceneNum: number) => {
+  handle('set-scene', async (_event, id: string, sceneNum: number) => {
     if (typeof id !== 'string' || typeof sceneNum !== 'number') return false
     manual([id])
     return lightManager.setScene(id, sceneNum)
   })
 
-  ipcMain.handle('set-countdown', async (_event, id: string, seconds: number) => {
+  handle('set-countdown', async (_event, id: string, seconds: number) => {
     if (typeof id !== 'string' || typeof seconds !== 'number') return false
     return lightManager.setCountdown(id, seconds)
   })
 
-  ipcMain.handle('set-all', async (_event, on: boolean) => {
+  handle('set-all', async (_event, on: boolean) => {
     if (typeof on !== 'boolean') return []
     lightManager.markAllManual()
     return lightManager.setAll(on)
   })
 
-  ipcMain.handle('set-group-power', async (_event, deviceIds: string[], on: boolean) => {
+  handle('set-group-power', async (_event, deviceIds: string[], on: boolean) => {
     if (!Array.isArray(deviceIds) || typeof on !== 'boolean') return []
     manual(deviceIds)
     return lightManager.setGroupPower(deviceIds, on)
   })
 
-  ipcMain.handle('set-group-brightness', async (_event, deviceIds: string[], value: number) => {
+  handle('set-group-brightness', async (_event, deviceIds: string[], value: number) => {
     if (!Array.isArray(deviceIds) || typeof value !== 'number') return []
     manual(deviceIds)
     return lightManager.setGroupBrightness(deviceIds, value)
   })
 
-  ipcMain.handle('set-group-color-temp', async (_event, deviceIds: string[], value: number) => {
+  handle('set-group-color-temp', async (_event, deviceIds: string[], value: number) => {
     if (!Array.isArray(deviceIds) || typeof value !== 'number') return []
     manual(deviceIds)
     return lightManager.setGroupColorTemp(deviceIds, value)
   })
 
   // Flash action IPC
-  ipcMain.handle('trigger-flash', async (_event, targetId?: string, roomId?: string, count: number = 2) => {
+  handle('trigger-flash', async (_event, targetId?: string, roomId?: string, count: number = 2) => {
     return webhookServer.flashLights(targetId, roomId, count)
   })
 
   // Store & Settings IPC
-  ipcMain.handle('get-store', async () => {
+  handle('get-store', async () => {
     return lumosStore.getData()
   })
 
-  ipcMain.handle('set-device-meta', async (_event, id: string, meta: Partial<DeviceMetadata>) => {
+  handle('set-device-meta', async (_event, id: string, meta: Partial<DeviceMetadata>) => {
     lumosStore.setDeviceMeta(id, meta)
     return true
   })
 
-  ipcMain.handle('save-room', async (_event, room: { id?: string; name: string; deviceIds: string[] }) => {
+  handle('save-room', async (_event, room: { id?: string; name: string; deviceIds: string[] }) => {
     if (room.id) {
       return lumosStore.updateRoom(room.id, room.name, room.deviceIds)
     } else {
@@ -167,20 +172,20 @@ export function setupIPC(
     }
   })
 
-  ipcMain.handle('delete-room', async (_event, id: string) => {
+  handle('delete-room', async (_event, id: string) => {
     return lumosStore.deleteRoom(id)
   })
 
-  ipcMain.handle('save-preset', async (_event, preset: Preset) => {
+  handle('save-preset', async (_event, preset: Preset) => {
     lumosStore.savePreset(preset)
     return true
   })
 
-  ipcMain.handle('delete-preset', async (_event, id: string) => {
+  handle('delete-preset', async (_event, id: string) => {
     return lumosStore.deletePreset(id)
   })
 
-  ipcMain.handle(
+  handle(
     'apply-preset',
     async (_event, presetId: string, targetType: 'all' | 'room' | 'light', targetId?: string) => {
       manual(lumosStore.resolveTargetIds(targetType, targetId))
@@ -188,16 +193,16 @@ export function setupIPC(
     }
   )
 
-  ipcMain.handle('save-schedule', async (_event, schedule: Schedule) => {
+  handle('save-schedule', async (_event, schedule: Schedule) => {
     lumosStore.saveSchedule(schedule)
     return true
   })
 
-  ipcMain.handle('delete-schedule', async (_event, id: string) => {
+  handle('delete-schedule', async (_event, id: string) => {
     return lumosStore.deleteSchedule(id)
   })
 
-  ipcMain.handle(
+  handle(
     'start-sleep-timer',
     async (_event, targetType: 'all' | 'room' | 'light', targetId: string | undefined, durationMinutes: number) => {
       lumosStore.startSleepTimer(targetType, targetId, durationMinutes)
@@ -205,12 +210,12 @@ export function setupIPC(
     }
   )
 
-  ipcMain.handle('cancel-sleep-timer', async () => {
+  handle('cancel-sleep-timer', async () => {
     lumosStore.cancelSleepTimer()
     return true
   })
 
-  ipcMain.handle('save-sunrise-alarm', async (_event, alarm: SunriseAlarm | null) => {
+  handle('save-sunrise-alarm', async (_event, alarm: SunriseAlarm | null) => {
     lumosStore.saveSunriseAlarm(alarm)
     return true
   })
@@ -220,27 +225,28 @@ export function setupIPC(
     const win = getMainWindow()
     if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
   }
-  effectManager.on('snapshot', (snapshot) => send('effects-update', snapshot))
-  effectManager.on('paused', (notice) => send('effect-paused', notice))
-  effectManager.on('live', (live) => send('effects-live', live))
+  // When this computer controls another computer's lights, these come from there instead
+  effectManager.on('snapshot', (snapshot) => !isForwarding() && send('effects-update', snapshot))
+  effectManager.on('paused', (notice) => !isForwarding() && send('effect-paused', notice))
+  effectManager.on('live', (live) => !isForwarding() && send('effects-live', live))
 
-  ipcMain.handle('effects-get', async () => effectManager.snapshot())
+  handle('effects-get', async () => effectManager.snapshot())
 
-  ipcMain.handle('effects-set-enabled', async (_event, id: string, on: boolean) => {
+  handle('effects-set-enabled', async (_event, id: string, on: boolean) => {
     if (typeof id !== 'string' || typeof on !== 'boolean') return effectManager.snapshot()
     return effectManager.setEnabled(id, on)
   })
 
-  ipcMain.handle('effects-update-settings', async (_event, id: string, patch: unknown) => {
+  handle('effects-update-settings', async (_event, id: string, patch: unknown) => {
     if (typeof id !== 'string') return effectManager.snapshot()
     return effectManager.updateSettings(id, patch)
   })
 
-  ipcMain.handle('effects-update-global', async (_event, patch: unknown) => {
+  handle('effects-update-global', async (_event, patch: unknown) => {
     return effectManager.updateGlobal(patch)
   })
 
-  ipcMain.handle('effects-resume-lights', async (_event, id: string, lightIds: string[]) => {
+  handle('effects-resume-lights', async (_event, id: string, lightIds: string[]) => {
     if (typeof id !== 'string' || !Array.isArray(lightIds)) return effectManager.snapshot()
     return effectManager.resumeLight(
       id,
@@ -248,7 +254,7 @@ export function setupIPC(
     )
   })
 
-  ipcMain.handle('effects-action', async (_event, id: string, action: string, payload: unknown) => {
+  handle('effects-action', async (_event, id: string, action: string, payload: unknown) => {
     if (typeof id !== 'string' || typeof action !== 'string') return { ok: false, error: 'Invalid request' }
     try {
       return { ok: true, result: await effectManager.action(id, action, payload) }
@@ -260,27 +266,29 @@ export function setupIPC(
   // Energy IPC Handlers (all figures are estimates)
   const isRange = (r: unknown): r is EnergyRange => r === 'today' || r === '7d' || r === '30d'
 
-  ipcMain.handle('energy-report', async (_event, range: unknown) => {
+  handle('energy-report', async (_event, range: unknown) => {
     return energyTracker.report(isRange(range) ? range : 'today')
   })
 
-  ipcMain.handle('energy-set-watts', async (_event, id: string, watts: number) => {
+  handle('energy-set-watts', async (_event, id: string, watts: number) => {
     if (typeof id !== 'string' || typeof watts !== 'number' || !Number.isFinite(watts)) return false
     energyTracker.setRatedWatts(id, watts)
     return true
   })
 
-  ipcMain.handle('energy-set-price', async (_event, price: unknown) => {
+  handle('energy-set-price', async (_event, price: unknown) => {
     energyTracker.setPrice(price === null ? null : price)
     return true
   })
 
-  ipcMain.handle('energy-reset', async () => {
+  handle('energy-reset', async () => {
     energyTracker.reset()
     return true
   })
 
-  ipcMain.handle('energy-export', async () => {
+  handle('energy-csv', async () => energyTracker.toCsv())
+
+  handle('energy-export', async () => {
     const win = getMainWindow()
     const today = new Date().toISOString().slice(0, 10)
     const result = await dialog.showSaveDialog(win || (undefined as any), {
@@ -290,7 +298,9 @@ export function setupIPC(
     })
     if (result.canceled || !result.filePath) return { canceled: true }
     try {
-      writeFileSync(result.filePath, energyTracker.toCsv(), 'utf-8')
+      // The estimates live with the lights; the file is saved on this computer
+      const csv = (await invokeAuto('energy-csv', [])) as string
+      writeFileSync(result.filePath, csv, 'utf-8')
       return { canceled: false, success: true }
     } catch (err: any) {
       return { canceled: false, success: false, error: err?.message || 'Could not save the file' }
@@ -298,25 +308,25 @@ export function setupIPC(
   })
 
   // HomeKit IPC Handlers
-  ipcMain.handle('get-homekit-info', async () => {
+  handle('get-homekit-info', async () => {
     return homeKitManager.getHomeKitInfo()
   })
 
-  ipcMain.handle('reset-homekit', async () => {
+  handle('reset-homekit', async () => {
     return homeKitManager.resetHomeKit()
   })
 
   // Webhook IPC Handlers
-  ipcMain.handle('get-webhook-info', async () => {
+  handle('get-webhook-info', async () => {
     return webhookServer.getInfo()
   })
 
   // Onboarding & Device Import IPC Handlers
-  ipcMain.handle('has-devices-config', async () => {
+  handle('has-devices-config', async () => {
     return hasDevicesConfig()
   })
 
-  ipcMain.handle('pick-and-import-devices-file', async () => {
+  handle('pick-and-import-devices-file', async () => {
     const win = getMainWindow()
     const result = await dialog.showOpenDialog(win || undefined as any, {
       title: 'Import TinyTuya devices.json',
@@ -349,7 +359,7 @@ export function setupIPC(
     }
   })
 
-  ipcMain.handle('save-imported-devices', async (_event, rawJson: string) => {
+  handle('save-imported-devices', async (_event, rawJson: string) => {
     const validation = validateDevicesConfig(rawJson)
     if (!validation.valid) {
       return { success: false, error: validation.error }
@@ -363,17 +373,17 @@ export function setupIPC(
     return { success: false, error: saveRes.error }
   })
 
-  ipcMain.handle('start-demo-mode', async () => {
+  handle('start-demo-mode', async () => {
     lightManager.setDemoMode(true)
     return lightManager.getAllStates()
   })
 
-  ipcMain.handle('get-is-demo-mode', async () => {
+  handle('get-is-demo-mode', async () => {
     return lightManager.getIsDemoMode()
   })
 
   // External URL opener
-  ipcMain.handle('open-external-url', async (_event, url: string) => {
+  handle('open-external-url', async (_event, url: string) => {
     if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
       shell.openExternal(url)
       return true
@@ -382,7 +392,7 @@ export function setupIPC(
   })
 
   // Launch at login Handlers
-  ipcMain.handle('get-launch-at-login', () => {
+  handle('get-launch-at-login', () => {
     try {
       const stored = lumosStore.getLaunchAtLogin()
       if (typeof stored === 'boolean') {
@@ -394,7 +404,7 @@ export function setupIPC(
     }
   })
 
-  ipcMain.handle('set-launch-at-login', (_event, openAtLogin: boolean) => {
+  handle('set-launch-at-login', (_event, openAtLogin: boolean) => {
     if (typeof openAtLogin !== 'boolean') return false
     try {
       app.setLoginItemSettings({
@@ -410,12 +420,12 @@ export function setupIPC(
   })
 
   // Window control helpers for frameless title bar
-  ipcMain.handle('window-minimize', () => {
+  handle('window-minimize', () => {
     const win = getMainWindow()
     if (win && !win.isDestroyed()) win.minimize()
   })
 
-  ipcMain.handle('window-maximize', () => {
+  handle('window-maximize', () => {
     const win = getMainWindow()
     if (win && !win.isDestroyed()) {
       if (win.isMaximized()) {
@@ -426,7 +436,7 @@ export function setupIPC(
     }
   })
 
-  ipcMain.handle('window-close', () => {
+  handle('window-close', () => {
     const win = getMainWindow()
     if (win && !win.isDestroyed()) {
       win.close()

@@ -23,6 +23,7 @@ import { GlassButton } from './ui/GlassButton'
 import { CapsuleSlider } from './ui/CapsuleSlider'
 import { ColorWheel } from './ui/ColorWheel'
 import { NormalizedLightState, ColorHS, DeviceMetadata, RoomGroup } from '../types'
+import { offlineLabel } from '../lib/connection'
 import { springs } from '../lib/constants'
 import { cctToRgb, hsvToRgb } from '../lib/color'
 
@@ -279,7 +280,7 @@ export const LightDetailSheet: React.FC<LightDetailSheetProps> = ({
                       </div>
                     )}
                     <span className="text-[11px] text-zinc-400 truncate">
-                      {roomLabel} · {online ? (power ? `${brightness}%` : 'Off') : 'No response'}
+                      {roomLabel} · {online ? (power ? `${brightness}%` : 'Off') : offlineLabel(light.connectionIssue)}
                     </span>
                   </div>
                 </div>

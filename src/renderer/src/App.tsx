@@ -35,7 +35,8 @@ import {
   RoomGroup,
   Schedule,
   EffectsSnapshotData,
-  EffectPausedNotice
+  EffectPausedNotice,
+  RemoteStateData
 } from './types'
 import { springs } from './lib/constants'
 
@@ -51,6 +52,7 @@ export const App: React.FC = () => {
   const [lights, setLights] = useState<NormalizedLightState[]>([])
   const [store, setStore] = useState<LumosStoreData | null>(null)
   const [effects, setEffects] = useState<EffectsSnapshotData | null>(null)
+  const [remote, setRemote] = useState<RemoteStateData | null>(null)
   const [loading, setLoading] = useState(true)
   const [hasConfig, setHasConfig] = useState<boolean>(true)
   const [isDemoMode, setIsDemoMode] = useState<boolean>(false)
@@ -217,6 +219,49 @@ export const App: React.FC = () => {
     }
     return undefined
   }, [fetchStatusAndStore])
+
+  // Retries offline lights now, searching the network for any whose address changed
+  const handleReconnectLights = useCallback(async () => {
+    const api = window.lumos
+    if (!api?.reconnectLights) {
+      await fetchStatusAndStore()
+      return
+    }
+    const offline = lights.filter((l) => !l.online && !l.hidden).length
+    if (offline > 0) showToast(offline === 1 ? 'Looking for 1 light' : `Looking for ${offline} lights`)
+    try {
+      await api.reconnectLights()
+    } finally {
+      await fetchStatusAndStore()
+    }
+  }, [fetchStatusAndStore, lights, showToast])
+
+  // Control from another computer: reload everything whenever the link to it comes up
+  useEffect(() => {
+    const api = window.lumos
+    if (!api?.getRemoteState) return undefined
+    let lastLink = ''
+    const apply = (s: RemoteStateData): void => {
+      setRemote(s)
+      const link = s.role === 'client' && s.client ? `${s.client.address}:${s.client.state}` : s.role
+      if (link === lastLink) return
+      const wasSet = lastLink !== ''
+      lastLink = link
+      if (!wasSet) return
+      if ((s.role === 'client' && s.client?.state === 'connected') || s.role !== 'client') {
+        void fetchStatusAndStore()
+        api.getEffects?.().then(setEffects).catch(() => {})
+      }
+    }
+    api.getRemoteState().then((s) => {
+      setRemote(s)
+      lastLink = s.role === 'client' && s.client ? `${s.client.address}:${s.client.state}` : s.role
+    }).catch(() => {})
+    return api.onRemoteStatus(apply)
+  }, [fetchStatusAndStore])
+
+  const remoteHubName = remote?.role === 'client' ? remote.client?.hubName ?? null : null
+  const remoteDown = remote?.role === 'client' && remote.client?.state !== 'connected'
 
   const handleExploreDemo = useCallback(async () => {
     const api = window.lumos || window.lumen
@@ -637,7 +682,9 @@ export const App: React.FC = () => {
 
     return {
       title: isDemoMode ? 'Home (Demo)' : 'Home',
-      subtitle: activeLights > 0 ? `${activeLights} lights on` : 'All lights off',
+      subtitle:
+        (activeLights > 0 ? `${activeLights} lights on` : 'All lights off') +
+        (remoteHubName ? ` · through ${remoteHubName}` : ''),
       primaryActionLabel: 'Add Room',
       primaryActionIcon: Plus,
       onPrimaryAction: () => setIsRoomsOpen(true),
@@ -658,7 +705,8 @@ export const App: React.FC = () => {
     handleToggleRoom,
     handleSetAll,
     effects,
-    activeEffectCount
+    activeEffectCount,
+    remoteHubName
   ])
 
   // If no devices configured and not exploring demo, show first-run onboarding screen
@@ -712,13 +760,25 @@ export const App: React.FC = () => {
           anyActive={toolbarConfig.anyActive}
           totalLights={toolbarConfig.totalLights}
           onTogglePower={toolbarConfig.onTogglePower}
-          onScanSubnet={fetchStatusAndStore}
-          onRefresh={fetchStatusAndStore}
+          onScanSubnet={handleReconnectLights}
+          onRefresh={handleReconnectLights}
           onOpenSettings={() => setIsSettingsOpen(true)}
         />
 
         {/* Scrollable View Canvas */}
         <main className="flex-1 overflow-y-auto px-6 sm:px-8 py-4 pb-20 no-scrollbar">
+          {remoteDown && remote?.client && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="max-w-6xl mx-auto mb-4 flex items-center gap-3 px-4 py-3 rounded-2xl bg-white/[0.04] border border-white/[0.08] text-xs text-zinc-300"
+            >
+              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${remote.client.state === 'connecting' ? 'bg-sky-400 animate-pulse' : 'bg-rose-400'}`} />
+              {remote.client.state === 'connecting'
+                ? `Connecting to ${remote.client.hubName}`
+                : remote.client.error || `Cannot reach ${remote.client.hubName}. These lights are controlled through it, so make sure Lumos is running there.`}
+            </div>
+          )}
           {loading ? (
             /* Shimmering Tile Skeletons */
             <div className="max-w-6xl mx-auto flex flex-col gap-6">
@@ -930,6 +990,7 @@ export const App: React.FC = () => {
                   lights={visibleLights}
                   isDemoMode={isDemoMode}
                   onToggle={handleToggleEffect}
+                  runningOn={remoteHubName}
                 />
               )}
 

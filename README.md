@@ -327,11 +327,26 @@ Lumos adds up energy whenever a light's output changes and stores compact daily 
 
 ---
 
+## Control from More Than One Computer
+
+Each Tuya light accepts only one direct local connection, so two computers running Lumos would fight over the lights. Instead, one computer keeps the connection to the lights and the others control them through it.
+
+1. On the computer that should keep the lights (for example the one hosting the hotspot your lights use), open **Settings > Other computers** and turn on **Share these lights with other computers**. A six-digit pairing code appears. If Windows asks whether to allow Lumos on this network, allow it.
+2. On the other computer, open **Settings > Other computers**, choose **Connect**, pick the computer from the list (or type its address), enter the code, and choose **Connect**.
+
+From then on, the second computer stops connecting to the lights itself. Its lights, rooms, scenes, automations, effects, and energy all come from the first computer and stay in sync both ways, and it reconnects on its own after restarts, sleep, or address changes. Effects such as Music and Album color run on the first computer and follow what plays there. Choose **Stop using** to go back to connecting directly, and **Remove** on the first computer to unpair a computer.
+
+**Security:** pairing needs the code shown on the sharing computer; each code works once, expires after 10 minutes, and five wrong codes lock pairing for 10 minutes. After pairing, the shared secret never crosses the network again: each connection proves it in both directions with an HMAC challenge, and every message is encrypted with AES-256-GCM using a fresh key per connection, with replayed messages rejected. Only addresses on private networks are accepted. Lumos listens on TCP port 8990 and announces itself on UDP port 8991 while sharing is on.
+
+---
+
 ## Troubleshooting
 
 ### Device Shows Offline
 - Verify that the light fixture is powered on at the physical wall switch.
-- Ensure the IP address in your configuration matches the bulb's current DHCP assignment. If the IP changed, Lumos will automatically attempt ARP MAC resolution, or you can run `python -m tinytuya scan` to refresh IP addresses.
+- **After a power cut**, your router or hotspot may give the lights new addresses. Lumos notices when a light stops answering at its saved address and searches the local network for it, confirming the light with its own key, then saves the new address. To search straight away, choose **Refresh Status** or **Scan Subnet** from the toolbar's more menu.
+- The light's status says why it is offline: **Searching** while Lumos looks for it, **In use elsewhere** when the light answers but another app holds its connection (see below), or **No response** when nothing answers.
+- You can also run `python -m tinytuya scan` to list current addresses.
 
 ### Protocol Version Mismatch
 - Tuya devices communicate on protocol version 3.1, 3.3, 3.4, or 3.5. Ensure the `version` field in `devices.json` matches your device (usually `"3.3"` for standard Wi-Fi bulbs).
@@ -340,7 +355,8 @@ Lumos adds up energy whenever a light's output changes and stores compact daily 
 - If a bulb is re-paired or reset in the Smart Life app, Tuya generates a new local key. You must re-run `python -m tinytuya wizard` to obtain the updated `key`.
 
 ### Multiple Local Connections Conflict
-- Tuya Wi-Fi bulbs only accept **one** active local TCP connection at a time. If the Smart Life app is open on your mobile device or another local controller is active, close it to allow Lumos to connect.
+- Tuya Wi-Fi bulbs only accept **one** active local TCP connection at a time. A light that Lumos on one computer is connected to shows **In use elsewhere** on another computer running Lumos. To use more than one computer, turn on sharing on one of them and connect the others to it; see [Control from More Than One Computer](#control-from-more-than-one-computer).
+- Other local controllers (Home Assistant, TinyTuya scripts) take the connection the same way. The Smart Life app itself uses the cloud and does not.
 
 ### Bulbs Not Showing Color Controls
 - Only bulbs that report `colour_data_v2` or `colour_data` in their DPS mapping provide RGB color controls. White/CCT-only bulbs will show brightness and temperature sliders only.
