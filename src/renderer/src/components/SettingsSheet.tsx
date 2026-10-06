@@ -283,15 +283,21 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, o
                     </span>
                     <div className="flex flex-col rounded-2xl bg-white/[0.04] border border-white/[0.07] divide-y divide-white/[0.06] overflow-hidden">
                       {/* Launch at Login */}
-                      <div className="h-12 px-4 flex items-center justify-between">
+                      <div
+                        className="h-12 px-4 flex items-center justify-between cursor-pointer hover:bg-white/[0.02] transition-colors"
+                        onClick={handleToggleLaunchAtLogin}
+                      >
                         <div className="flex items-center gap-3">
-                          <Power className="w-4 h-4 text-zinc-400" />
+                          <Power className={`w-4 h-4 transition-colors ${launchAtLogin ? 'text-amber-400' : 'text-zinc-400'}`} />
                           <span className="text-xs font-medium text-white">Launch at Login</span>
                         </div>
                         <GlassButton
                           variant={launchAtLogin ? 'prominent' : 'standard'}
                           size="sm"
-                          onClick={handleToggleLaunchAtLogin}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleToggleLaunchAtLogin()
+                          }}
                           className="text-xs"
                         >
                           <Check className={`w-3.5 h-3.5 ${launchAtLogin ? 'opacity-100' : 'opacity-0'}`} />
@@ -300,15 +306,21 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, o
                       </div>
 
                       {/* Start Minimized in Tray */}
-                      <div className="h-12 px-4 flex items-center justify-between">
+                      <div
+                        className="h-12 px-4 flex items-center justify-between cursor-pointer hover:bg-white/[0.02] transition-colors"
+                        onClick={() => setStartInTray(!startInTray)}
+                      >
                         <div className="flex items-center gap-3">
-                          <ShieldCheck className="w-4 h-4 text-zinc-400" />
+                          <ShieldCheck className={`w-4 h-4 transition-colors ${startInTray ? 'text-amber-400' : 'text-zinc-400'}`} />
                           <span className="text-xs font-medium text-white">Start Minimized in System Tray</span>
                         </div>
                         <GlassButton
                           variant={startInTray ? 'prominent' : 'standard'}
                           size="sm"
-                          onClick={() => setStartInTray(!startInTray)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setStartInTray(!startInTray)
+                          }}
                           className="text-xs"
                         >
                           <Check className={`w-3.5 h-3.5 ${startInTray ? 'opacity-100' : 'opacity-0'}`} />

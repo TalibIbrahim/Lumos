@@ -292,6 +292,7 @@ export function setupIPC(
       app.setLoginItemSettings({
         openAtLogin,
         openAsHidden: true,
+        path: process.execPath,
         args: ['--hidden']
       })
       return app.getLoginItemSettings().openAtLogin
