@@ -1,0 +1,7 @@
+{
+  "provider": { "name": "Counter-Strike: Global Offensive", "appid": 730, "steamid": "76561190000000001" },
+  "map": { "mode": "competitive", "name": "de_dust2", "phase": "live" },
+  "round": { "phase": "live" },
+  "player": { "steamid": "76561190000000001", "activity": "playing", "state": { "health": 0, "armor": 0 } },
+  "auth": { "token": "0123456789abcdef0123" }
+}

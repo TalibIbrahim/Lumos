@@ -8,6 +8,11 @@ files:
   - out/**/*
   - build/**/*
   - package.json
+extraResources:
+  - from: resources/media-helper
+    to: media-helper
+    filter:
+      - "*.exe"
 win:
   icon: build/icon.ico
   signAndEditExecutable: false

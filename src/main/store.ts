@@ -54,6 +54,7 @@ export class LumosStore {
   private lightManager: LightManager | null = null
   private schedulerInterval: NodeJS.Timeout | null = null
   private lastTriggeredMinute: string = ''
+  private lastStateSaveTimer: NodeJS.Timeout | null = null
   private onBroadcast?: () => void
 
   constructor() {
@@ -189,7 +190,12 @@ export class LumosStore {
       ...existing,
       lastState: state
     }
-    this.save()
+    // State changes arrive many times a second while sliders move; write once they settle.
+    if (this.lastStateSaveTimer) clearTimeout(this.lastStateSaveTimer)
+    this.lastStateSaveTimer = setTimeout(() => {
+      this.lastStateSaveTimer = null
+      this.save()
+    }, 1000)
   }
 
   public async restoreLastStates(): Promise<void> {
@@ -343,6 +349,10 @@ export class LumosStore {
   }
 
   // --- Helpers & Background Scheduler ---
+  public resolveTargetIds(targetType: 'all' | 'room' | 'light', targetId?: string): string[] {
+    return this.resolveTargetLights(targetType, targetId).map((l) => l.id)
+  }
+
   private resolveTargetLights(targetType: 'all' | 'room' | 'light', targetId?: string) {
     if (!this.lightManager) return []
     const all = this.lightManager.getAllLights()
@@ -447,6 +457,11 @@ export class LumosStore {
   }
 
   public destroy(): void {
+    if (this.lastStateSaveTimer) {
+      clearTimeout(this.lastStateSaveTimer)
+      this.lastStateSaveTimer = null
+      this.save()
+    }
     if (this.schedulerInterval) {
       clearInterval(this.schedulerInterval)
       this.schedulerInterval = null

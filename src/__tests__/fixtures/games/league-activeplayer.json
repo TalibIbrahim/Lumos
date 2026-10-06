@@ -1,0 +1,15 @@
+{
+  "abilities": {},
+  "championStats": {
+    "abilityHaste": 0.0, "abilityPower": 0.0, "armor": 32.0, "attackDamage": 60.0, "attackRange": 550.0, "attackSpeed": 0.65,
+    "currentHealth": 182.0, "healthRegenRate": 1.1, "magicResist": 30.0, "maxHealth": 640.0, "moveSpeed": 335.0,
+    "resourceMax": 400.0, "resourceRegenRate": 1.6, "resourceType": "MANA", "resourceValue": 250.0
+  },
+  "currentGold": 500.0,
+  "fullRunes": {},
+  "level": 6,
+  "summonerName": "Sample Summoner",
+  "riotId": "Sample Summoner#TAG1",
+  "riotIdGameName": "Sample Summoner",
+  "riotIdTagLine": "TAG1"
+}

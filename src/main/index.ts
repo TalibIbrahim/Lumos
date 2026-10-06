@@ -11,10 +11,16 @@ import { createTray } from './tray'
 import { lumosStore } from './store'
 import { setupAutoUpdater } from './updater'
 import { NormalizedLightState } from './types'
+import { EffectManager } from './effects/EffectManager'
+import { registerEffects } from './effects/registry'
+import { EnergyTracker } from './energy/EnergyTracker'
 
 let mainWindow: BrowserWindow | null = null
 let lightManager: LightManager | null = null
+let effectManager: EffectManager | null = null
+let energyTracker: EnergyTracker | null = null
 let isQuitting = false
+let cleanupDone = false
 
 function getAppIconPath(): string {
   if (process.platform === 'win32') {
@@ -104,6 +110,18 @@ app.whenReady().then(async () => {
     }
   })
 
+  // Effects: the compositor owns every write to the bulbs from here on
+  effectManager = new EffectManager(lightManager, app.getPath('userData'))
+  registerEffects(effectManager)
+  energyTracker = new EnergyTracker(lightManager, app.getPath('userData'))
+  lightManager.onLightsLoaded = () => {
+    effectManager?.attachLights()
+    energyTracker?.attach()
+  }
+  lightManager.onManualChange = (ids) => effectManager?.markManual(ids)
+  webhookServer.setEffectManager(effectManager)
+  homeKitManager.setEffectManager(effectManager)
+
   // Initialize Lumos Persistent Store & Automations
   lumosStore.init(lightManager, () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -112,7 +130,7 @@ app.whenReady().then(async () => {
   })
 
   // Setup IPC handlers
-  setupIPC(lightManager, homeKitManager, () => mainWindow)
+  setupIPC(lightManager, homeKitManager, () => mainWindow, effectManager, energyTracker)
 
   // Setup Auto-Updater
   setupAutoUpdater(() => mainWindow)
@@ -132,6 +150,14 @@ app.whenReady().then(async () => {
         await lumosStore.restoreLastStates()
       } catch (err) {
         console.warn('[Lumos] Error restoring last states:', err)
+      }
+
+      energyTracker?.start()
+
+      try {
+        await effectManager?.startEnabled()
+      } catch (err) {
+        console.warn('[Lumos] Error starting effects:', err)
       }
 
       if (!isDemo) {
@@ -155,14 +181,32 @@ app.whenReady().then(async () => {
   })
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   isQuitting = true
-  lumosStore.destroy()
-  webhookServer.stop()
-  homeKitManager.stop()
-  if (lightManager) {
-    lightManager.disconnectAll()
-  }
+  if (cleanupDone) return
+
+  // Effects stop first and the bulbs get their base state back before the
+  // connections close, so no light is left showing an effect.
+  event.preventDefault()
+  void (async () => {
+    try {
+      await Promise.race([
+        effectManager?.shutdown(),
+        new Promise((resolve) => setTimeout(resolve, 1500))
+      ])
+    } catch (err) {
+      console.warn('[Lumos] Error stopping effects:', err)
+    }
+    energyTracker?.stop()
+    lumosStore.destroy()
+    webhookServer.stop()
+    homeKitManager.stop()
+    if (lightManager) {
+      lightManager.disconnectAll()
+    }
+    cleanupDone = true
+    app.quit()
+  })()
 })
 
 app.on('window-all-closed', () => {

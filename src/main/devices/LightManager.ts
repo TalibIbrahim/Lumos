@@ -9,8 +9,23 @@ export class LightManager {
   private isDemoMode = false
   private isInitialized = false
 
+  /** Called after the set of lights is created or replaced. */
+  public onLightsLoaded?: () => void
+  /** Called before lights are changed by hand (app UI, HomeKit, webhook). */
+  public onManualChange?: (lightIds: string[]) => void
+
   constructor(onStateBroadcast: (state: NormalizedLightState) => void) {
     this.onStateBroadcast = onStateBroadcast
+  }
+
+  /** Marks lights as changed by hand so ambient effects step aside for them. */
+  public markManual(lightIds: string[]): void {
+    const ids = lightIds.filter((id) => this.lights.has(id))
+    if (ids.length > 0) this.onManualChange?.(ids)
+  }
+
+  public markAllManual(): void {
+    this.markManual(Array.from(this.lights.keys()))
   }
 
   public async init(isDemo: boolean = false): Promise<void> {
@@ -99,6 +114,8 @@ export class LightManager {
 
       light.connect()
     }
+
+    this.onLightsLoaded?.()
 
     if (detectedTable.length > 0) {
       console.log(`\n[Lumos] ${isDemo ? 'Demo' : 'Detected'} Lights:`)

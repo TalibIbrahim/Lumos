@@ -1,4 +1,5 @@
 import { LightManager } from './devices/LightManager'
+import { EffectManager } from './effects/EffectManager'
 
 export interface HomeKitInfo {
   isPaired: boolean
@@ -17,6 +18,7 @@ export function miredsToLumenColorTemp(mireds: number): number
 export function detectLanInterfaces(): string[]
 
 export class HomeKitManager {
+  setEffectManager(effectManager: EffectManager): void
   init(lightManager: LightManager): Promise<void>
   getHomeKitInfo(): Promise<HomeKitInfo>
   resetHomeKit(): Promise<HomeKitInfo>

@@ -11,6 +11,7 @@ import {
 } from '../types'
 import { latencyTracker } from '../latency'
 import { updatePersistedDeviceIp } from '../config'
+import { LightOutput, OutputField, changedFields, quantize } from '../effects/output'
 
 export class Light extends EventEmitter {
   public id: string
@@ -40,6 +41,18 @@ export class Light extends EventEmitter {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private pendingDps: Record<string, any> = {}
   private isFlushInFlight = false
+
+  // Output tracking. The fields below (power, brightness, ...) hold the base
+  // state, which is the user's intent. What the bulb is actually told to show
+  // can differ while effects are active, so it is tracked separately here.
+  public lastSentOutput: LightOutput | null = null
+  private forcedFields = new Set<OutputField>()
+  /** When set, base state changes are routed through the compositor. */
+  public outputSink?: (light: Light) => Promise<boolean>
+  /** Device reports before this time are echoes of effect output, not user changes. */
+  public suppressReportsUntil = 0
+  /** Label of the effect currently shaping this light's output, if any. */
+  public activeEffect?: string
 
   // Current internal state
   public power = false
@@ -220,6 +233,8 @@ export class Light extends EventEmitter {
             } catch {
               // Non-fatal if initial status query times out
             }
+            // Lets the compositor resend effect output the bulb lost while offline
+            this.emit('online')
           }
         }, 120)
       })
@@ -397,6 +412,9 @@ export class Light extends EventEmitter {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private handleTuyaData(data: any): void {
     if (!data || !data.dps) return
+    // While effects drive the bulb, its reports echo effect output and must not
+    // overwrite the base state the user set.
+    if (Date.now() < this.suppressReportsUntil) return
 
     const dps = data.dps
     let stateChanged = false
@@ -434,6 +452,7 @@ export class Light extends EventEmitter {
           const s = Math.round(Math.max(0, Math.min(100, sRaw / 10)))
           const v = Math.round(Math.max(0, Math.min(100, vRaw / 10)))
           this.color = { h, s, v }
+          if (this.mode === 'colour') this.brightness = v
           stateChanged = true
         } else {
           const parsed = typeof rawColor === 'string' ? JSON.parse(rawColor) : rawColor
@@ -472,6 +491,9 @@ export class Light extends EventEmitter {
     }
 
     if (stateChanged) {
+      // The device just reported what it shows, so later diffs start from it.
+      this.lastSentOutput = quantize(this.baseOutput())
+      this.emit('output', this.lastSentOutput)
       this.emitState()
     }
   }
@@ -522,7 +544,8 @@ export class Light extends EventEmitter {
       customName: this.customName,
       room: this.room,
       order: this.order,
-      hidden: this.hidden
+      hidden: this.hidden,
+      effect: this.activeEffect
     }
   }
 
@@ -536,6 +559,7 @@ export class Light extends EventEmitter {
 
   private async flushPendingDps(): Promise<boolean> {
     if (this.isDemo) {
+      this.pendingDps = {}
       latencyTracker.record('set_batch', this.id, 12)
       return true
     }
@@ -572,6 +596,136 @@ export class Light extends EventEmitter {
     return this.flushPendingDps()
   }
 
+  /** The output that represents the base state alone, with no effects applied. */
+  public baseOutput(): LightOutput {
+    const mode =
+      this.mode === 'colour' || this.mode === 'scene' || this.mode === 'music' ? this.mode : 'white'
+    const brightness = mode === 'colour' ? (this.color.v ?? this.brightness) : this.brightness
+    return {
+      power: this.power,
+      mode,
+      brightness,
+      colorTemp: this.colorTemp,
+      h: this.color.h,
+      s: this.color.s,
+      scene: mode === 'scene' ? this.scene : undefined
+    }
+  }
+
+  /**
+   * Sends an output to the bulb. Only fields that differ from what the bulb
+   * last received are sent, plus any fields a base state change marked as
+   * required. Colour outputs on white-only bulbs become white at the same level.
+   */
+  public async sendOutput(target: LightOutput): Promise<boolean> {
+    const next = quantize(this.adaptToCapabilities(target))
+    const prev = this.lastSentOutput
+    const fields = prev ? changedFields(prev, next) : new Set<OutputField>()
+    for (const f of this.forcedFields) fields.add(f)
+    this.forcedFields.clear()
+
+    if (fields.size === 0) return true
+    if (!this.isConnected && !this.isDemo) return false
+
+    this.lastSentOutput = next
+    this.emit('output', next)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dps: Record<string, any> = {}
+    const key = (n: number): string => n.toString()
+
+    if (fields.has('power')) dps[key(this.dpsMap.power)] = next.power
+    if (!next.power) {
+      return Object.keys(dps).length > 0 ? this.queueDpsUpdate(dps) : true
+    }
+
+    const modeChanged = fields.has('mode')
+    if (next.mode === 'colour') {
+      if (modeChanged) dps[key(this.dpsMap.mode)] = 'colour'
+      if (modeChanged || fields.has('color') || fields.has('brightness')) {
+        dps[key(this.dpsMap.color)] = this.encodeColour(next.h, next.s, next.brightness)
+      }
+    } else if (next.mode === 'white') {
+      if (modeChanged) dps[key(this.dpsMap.mode)] = 'white'
+      if (modeChanged || fields.has('brightness')) {
+        dps[key(this.dpsMap.brightness)] = this.normalizeBrightness(next.brightness)
+      }
+      if (this.capabilities.hasColorTemp && (modeChanged || fields.has('colorTemp'))) {
+        dps[key(this.dpsMap.colorTemp)] = this.normalizeColorTemp(next.colorTemp)
+      }
+    } else if (next.mode === 'scene') {
+      if (modeChanged || fields.has('scene')) {
+        dps[key(this.dpsMap.scene)] = JSON.stringify(this.buildScenePayload(next.scene ?? 1))
+        dps[key(this.dpsMap.mode)] = 'scene'
+      }
+    } else if (modeChanged) {
+      dps[key(this.dpsMap.mode)] = next.mode
+    }
+
+    if (Object.keys(dps).length === 0) return true
+    return this.queueDpsUpdate(dps)
+  }
+
+  private adaptToCapabilities(o: LightOutput): LightOutput {
+    if (o.mode === 'colour' && !this.capabilities.hasColor) {
+      // Pick the white temperature closest to the requested colour's warmth.
+      if (o.s < 15) return { ...o, mode: 'white' }
+      const colorTemp = o.h < 70 || o.h > 300 ? 0 : o.h > 160 && o.h < 260 ? 100 : 50
+      return { ...o, mode: 'white', colorTemp }
+    }
+    if (o.mode === 'scene' && !this.capabilities.hasScenes) return { ...o, mode: 'white' }
+    return o
+  }
+
+  private encodeColour(h: number, s: number, v: number): string {
+    const hexH = Math.max(0, Math.min(360, Math.round(h))).toString(16).padStart(4, '0')
+    const hexS = Math.round(Math.max(0, Math.min(100, s)) * 10).toString(16).padStart(4, '0')
+    const hexV = Math.round(Math.max(0, Math.min(100, v)) * 10).toString(16).padStart(4, '0')
+    return `${hexH}${hexS}${hexV}`.toLowerCase()
+  }
+
+  private buildScenePayload(sceneNum: number): Record<string, unknown> {
+    return {
+      scene_num: sceneNum,
+      scene_units: [
+        {
+          bright: 1000,
+          temperature: 500,
+          h: 0,
+          s: 0,
+          v: 0,
+          unit_change_mode: 'gradient',
+          unit_switch_duration: 15,
+          unit_gradient_duration: 15
+        }
+      ]
+    }
+  }
+
+  /** Applies a base state change: through the compositor if attached, otherwise directly. */
+  private commit(...fields: OutputField[]): Promise<boolean> {
+    for (const f of fields) this.forcedFields.add(f)
+    if (!this.isConnected && !this.isDemo) {
+      this.forcedFields.clear()
+      return Promise.resolve(false)
+    }
+    if (this.outputSink) return this.outputSink(this)
+    return this.sendOutput(this.baseOutput())
+  }
+
+  public hasForcedFields(): boolean {
+    return this.forcedFields.size > 0
+  }
+
+  /** Forgets what the bulb last received so the next output is sent in full. */
+  public invalidateOutput(): void {
+    this.lastSentOutput = null
+    this.forcedFields.add('power')
+    this.forcedFields.add('mode')
+    this.forcedFields.add('brightness')
+    this.forcedFields.add('colorTemp')
+    this.forcedFields.add('color')
+  }
+
   public async toggle(): Promise<boolean> {
     return this.setPower(!this.power)
   }
@@ -579,52 +733,38 @@ export class Light extends EventEmitter {
   public async setPower(on: boolean): Promise<boolean> {
     this.power = on
     this.emitState()
-
-    if (!this.isConnected && !this.isDemo) return false
-    return this.queueDpsUpdate({ [this.dpsMap.power.toString()]: on })
+    return this.commit('power')
   }
 
   public async setBrightness(normalizedValue: number): Promise<boolean> {
     const targetBri = Math.max(0, Math.min(100, normalizedValue))
-    const rawBri = this.normalizeBrightness(targetBri)
+    const fields: OutputField[] = []
 
     this.brightness = targetBri
-    const needsPowerOn = !this.power && targetBri > 0
-    if (needsPowerOn) {
+    if (this.mode === 'colour') {
+      // Dimming a colour keeps the colour rather than switching to white.
+      this.color = { ...this.color, v: targetBri }
+      fields.push('color')
+    } else {
+      if (this.mode !== 'white') {
+        this.mode = 'white'
+        fields.push('mode')
+      }
+      fields.push('brightness')
+    }
+    if (!this.power && targetBri > 0) {
       this.power = true
+      fields.push('power')
     }
     this.emitState()
-
-    if (!this.isConnected && !this.isDemo) return false
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updates: Record<string, any> = {
-      [this.dpsMap.brightness.toString()]: rawBri,
-      [this.dpsMap.mode.toString()]: 'white'
-    }
-    if (needsPowerOn) {
-      updates[this.dpsMap.power.toString()] = true
-    }
-
-    return this.queueDpsUpdate(updates)
+    return this.commit(...fields)
   }
 
   public async setColorTemp(normalizedValue: number): Promise<boolean> {
-    const targetTemp = Math.max(0, Math.min(100, normalizedValue))
-    const rawTemp = this.normalizeColorTemp(targetTemp)
-
-    this.colorTemp = targetTemp
+    this.colorTemp = Math.max(0, Math.min(100, normalizedValue))
     this.mode = 'white'
     this.emitState()
-
-    if (!this.isConnected && !this.isDemo) return false
-
-    const updates = {
-      [this.dpsMap.colorTemp.toString()]: rawTemp,
-      [this.dpsMap.mode.toString()]: 'white'
-    }
-
-    return this.queueDpsUpdate(updates)
+    return this.commit('mode', 'colorTemp')
   }
 
   public async setColor(h: number, s: number, v?: number): Promise<boolean> {
@@ -632,40 +772,23 @@ export class Light extends EventEmitter {
     const clampedH = Math.max(0, Math.min(360, Math.round(h)))
     const clampedS = Math.max(0, Math.min(100, Math.round(s)))
     const clampedV = Math.max(0, Math.min(100, Math.round(v ?? this.brightness)))
+    const fields: OutputField[] = ['mode', 'color']
 
     this.color = { h: clampedH, s: clampedS, v: clampedV }
+    this.brightness = clampedV
     this.mode = 'colour'
-    const needsPowerOn = !this.power && clampedV > 0
-    if (needsPowerOn) {
+    if (!this.power && clampedV > 0) {
       this.power = true
+      fields.push('power')
     }
     this.emitState()
-
-    if (!this.isConnected && !this.isDemo) return false
-
-    const hexH = clampedH.toString(16).padStart(4, '0')
-    const hexS = Math.round(clampedS * 10).toString(16).padStart(4, '0')
-    const hexV = Math.round(clampedV * 10).toString(16).padStart(4, '0')
-    const hexColor = `${hexH}${hexS}${hexV}`.toLowerCase()
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updates: Record<string, any> = {
-      [this.dpsMap.color.toString()]: hexColor,
-      [this.dpsMap.mode.toString()]: 'colour'
-    }
-    if (needsPowerOn) {
-      updates[this.dpsMap.power.toString()] = true
-    }
-
-    return this.queueDpsUpdate(updates)
+    return this.commit(...fields)
   }
 
   public async setWorkMode(mode: 'white' | 'colour' | 'scene' | 'music'): Promise<boolean> {
     this.mode = mode
     this.emitState()
-
-    if (!this.isConnected && !this.isDemo) return false
-    return this.queueDpsUpdate({ [this.dpsMap.mode.toString()]: mode })
+    return this.commit('mode')
   }
 
   public async setScene(sceneNum: number): Promise<boolean> {
@@ -673,44 +796,7 @@ export class Light extends EventEmitter {
     this.scene = sceneNum
     this.mode = 'scene'
     this.emitState()
-
-    if (this.isDemo) {
-      latencyTracker.record('set_scene', this.id, 15)
-      return true
-    }
-
-    if (!this.isConnected) return false
-
-    try {
-      const payload = {
-        scene_num: sceneNum,
-        scene_units: [
-          {
-            bright: 1000,
-            temperature: 500,
-            h: 0,
-            s: 0,
-            v: 0,
-            unit_change_mode: 'gradient',
-            unit_switch_duration: 15,
-            unit_gradient_duration: 15
-          }
-        ]
-      }
-
-      await this.tuya.set({
-        multiple: true,
-        data: {
-          [this.dpsMap.scene.toString()]: JSON.stringify(payload),
-          [this.dpsMap.mode.toString()]: 'scene'
-        },
-        shouldWaitForResponse: false
-      })
-      return true
-    } catch (err) {
-      console.error(`[Lumos Light ${this.name}] setScene error:`, err)
-      return false
-    }
+    return this.commit('mode', 'scene')
   }
 
   public async setCountdown(seconds: number): Promise<boolean> {

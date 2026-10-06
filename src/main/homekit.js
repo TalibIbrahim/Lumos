@@ -138,6 +138,7 @@ export class HomeKitManager {
     this.bridge = null
     this.accessories = []
     this.lightManager = null
+    this.effectManager = null
     this.config = null
     this.isInitialized = false
     this.storageInitialized = false
@@ -197,6 +198,11 @@ export class HomeKitManager {
     return newConfig
   }
 
+  /** Effects are exposed as Switch accessories so they can be toggled from Apple Home and Siri. */
+  setEffectManager(effectManager) {
+    this.effectManager = effectManager
+  }
+
   async init(lightManager) {
     if (this.isInitialized) return
     this.setupStorage()
@@ -224,6 +230,13 @@ export class HomeKitManager {
     // Lightbulb Service
     const service =
       accessory.getService(Service.Lightbulb) || accessory.addService(Service.Lightbulb, light.name)
+
+    // Changes from Apple Home are manual control, so ambient effects step aside
+    const markManual = () => {
+      if (this.lightManager && typeof this.lightManager.markManual === 'function') {
+        this.lightManager.markManual([light.id])
+      }
+    }
 
     // Coalescing and throttling state per light
     let pendingOn = null
@@ -263,6 +276,7 @@ export class HomeKitManager {
           return state.power
         })
         .onSet(async (value) => {
+          markManual()
           const boolVal = Boolean(value)
           if (!boolVal) {
             if (brightnessTimer) {
@@ -296,6 +310,7 @@ export class HomeKitManager {
           return state.brightness
         })
         .onSet(async (value) => {
+          markManual()
           const numBri = Number(value)
           if (numBri === 0) {
             if (brightnessTimer) {
@@ -370,6 +385,7 @@ export class HomeKitManager {
           return lumosColorTempToMireds(state.colorTemp)
         })
         .onSet(async (value) => {
+          markManual()
           const mireds = Number(value)
           const lumosCT = miredsToLumosColorTemp(mireds)
           pendingColorTemp = lumosCT
@@ -392,6 +408,7 @@ export class HomeKitManager {
           return state.color ? state.color.h : 0
         })
         .onSet(async (value) => {
+          markManual()
           pendingHue = Number(value)
           lastTargetMode = 'colour'
           scheduleColorBatch()
@@ -407,6 +424,7 @@ export class HomeKitManager {
           return state.color ? state.color.s : 100
         })
         .onSet(async (value) => {
+          markManual()
           pendingSat = Number(value)
           lastTargetMode = 'colour'
           scheduleColorBatch()
@@ -437,6 +455,37 @@ export class HomeKitManager {
       if (colorBatchTimer) clearTimeout(colorBatchTimer)
     }
 
+    return accessory
+  }
+
+  createAccessoryForEffect(effect) {
+    const manager = this.effectManager
+    const name = effect.voiceName || effect.label
+    const accessory = new Accessory(name, uuid.generate(`lumos-effect-${effect.id}`))
+
+    const infoService = accessory.getService(Service.AccessoryInformation)
+    if (infoService) {
+      infoService
+        .setCharacteristic(Characteristic.Manufacturer, 'Lumos')
+        .setCharacteristic(Characteristic.Model, 'Lumos Effect')
+        .setCharacteristic(Characteristic.SerialNumber, `effect-${effect.id}`)
+        .setCharacteristic(Characteristic.FirmwareRevision, '1.0.0')
+    }
+
+    const service = accessory.getService(Service.Switch) || accessory.addService(Service.Switch, name)
+    service
+      .getCharacteristic(Characteristic.On)
+      .onGet(() => effect.isEnabled())
+      .onSet(async (value) => {
+        await manager.setEnabled(effect.id, Boolean(value))
+      })
+
+    const snapshotListener = (snapshot) => {
+      const entry = snapshot.effects.find((e) => e.id === effect.id)
+      if (entry) service.updateCharacteristic(Characteristic.On, Boolean(entry.settings.enabled))
+    }
+    manager.on('snapshot', snapshotListener)
+    accessory._cleanUpListener = () => manager.removeListener('snapshot', snapshotListener)
     return accessory
   }
 
@@ -472,6 +521,14 @@ export class HomeKitManager {
       const acc = this.createAccessoryForLight(light)
       this.accessories.push(acc)
       this.bridge.addBridgedAccessory(acc)
+    }
+
+    if (this.effectManager) {
+      for (const effect of this.effectManager.list()) {
+        const acc = this.createAccessoryForEffect(effect)
+        this.accessories.push(acc)
+        this.bridge.addBridgedAccessory(acc)
+      }
     }
 
     const lanIfaces = detectLanInterfaces()

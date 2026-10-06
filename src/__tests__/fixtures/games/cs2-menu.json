@@ -1,0 +1,5 @@
+{
+  "provider": { "name": "Counter-Strike: Global Offensive", "appid": 730, "steamid": "76561190000000001" },
+  "player": { "steamid": "76561190000000001", "activity": "menu" },
+  "auth": { "token": "0123456789abcdef0123" }
+}

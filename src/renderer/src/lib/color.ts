@@ -88,7 +88,7 @@ export function getBulbColor(
 
   if (mode === 'colour' && color) {
     const rgb = hsvToRgb(color.h, color.s, 100)
-    // Dark tone for Aurora colorStop
+    // Dark tone of the colour
     const darkR = Math.round(rgb.r * 0.15)
     const darkG = Math.round(rgb.g * 0.15)
     const darkB = Math.round(rgb.b * 0.15)

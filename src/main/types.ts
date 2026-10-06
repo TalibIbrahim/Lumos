@@ -76,6 +76,7 @@ export interface NormalizedLightState {
   room?: string
   order?: number
   hidden?: boolean
+  effect?: string // label of the effect currently shaping this light's output
 }
 
 export const DEFAULT_DPS: DPSConfig = {
@@ -171,3 +172,60 @@ export interface LumosStoreData {
 }
 
 export type LumenStoreData = LumosStoreData
+
+// --- Effects (shared with the renderer) ---
+
+export type EffectStatusName = 'off' | 'waiting' | 'active' | 'error'
+
+export interface EffectSnapshotData {
+  id: string
+  label: string
+  description: string
+  status: EffectStatusName
+  statusDetail: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  settings: { enabled: boolean; targets: 'all' | string[] } & Record<string, any>
+  pausedLights: string[]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  info: Record<string, any>
+}
+
+export interface GlobalEffectSettingsData {
+  ratePerSecond: number
+  maxFlashesPerSecond: number
+  reduceIntensity: boolean
+  resumeOnLaunch: boolean
+}
+
+export interface EffectsSnapshotData {
+  global: GlobalEffectSettingsData
+  effects: EffectSnapshotData[]
+}
+
+export interface EffectPausedNotice {
+  effectId: string
+  effectLabel: string
+  lightIds: string[]
+  lightNames: string[]
+}
+
+export interface EffectActionResult {
+  ok: boolean
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  result?: any
+  error?: string
+}
+
+// --- Energy (all figures are estimates) ---
+
+export type EnergyRangeName = 'today' | '7d' | '30d'
+
+export interface EnergyReportData {
+  range: EnergyRangeName
+  totalKwh: number
+  estimatedCost: number | null
+  price: { perKwh: number; currency: string } | null
+  daily: Array<{ date: string; kwh: number }>
+  lights: Array<{ id: string; name: string; kwh: number; hoursOn: number; ratedWatts: number; watts: number }>
+  defaultWatts: number
+}

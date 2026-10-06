@@ -18,12 +18,20 @@ import {
   SunriseAlarm
 } from './types'
 import { latencyTracker } from './latency'
+import type { EffectManager } from './effects/EffectManager'
+import type { EnergyTracker, EnergyRange } from './energy/EnergyTracker'
+import { writeFileSync } from 'fs'
 
 export function setupIPC(
   lightManager: LightManager,
   homeKitManager: HomeKitManager,
-  getMainWindow: () => BrowserWindow | null
+  getMainWindow: () => BrowserWindow | null,
+  effectManager: EffectManager,
+  energyTracker: EnergyTracker
 ): void {
+  // Changes made here come from the user's hand, so ambient effects step aside
+  const manual = (ids: string[]): void => lightManager.markManual(ids)
+
   // Batch state updates to renderer over ~16ms animation frames
   const pendingBroadcastStates = new Map<string, NormalizedLightState>()
   let broadcastScheduled = false
@@ -49,32 +57,38 @@ export function setupIPC(
 
   ipcMain.handle('toggle-light', async (_event, id: string) => {
     if (typeof id !== 'string' || !id) return false
+    manual([id])
     return lightManager.toggleLight(id)
   })
 
   ipcMain.handle('set-power', async (_event, id: string, on: boolean) => {
     if (typeof id !== 'string' || typeof on !== 'boolean') return false
+    manual([id])
     return lightManager.setPower(id, on)
   })
 
   ipcMain.handle('set-brightness', async (_event, id: string, value: number) => {
     if (typeof id !== 'string' || typeof value !== 'number') return false
+    manual([id])
     return lightManager.setBrightness(id, value)
   })
 
   ipcMain.on('stream-brightness', (_event, id: string, value: number) => {
     if (typeof id === 'string' && typeof value === 'number') {
+      manual([id])
       lightManager.setBrightness(id, value)
     }
   })
 
   ipcMain.handle('set-color-temp', async (_event, id: string, value: number) => {
     if (typeof id !== 'string' || typeof value !== 'number') return false
+    manual([id])
     return lightManager.setColorTemp(id, value)
   })
 
   ipcMain.on('stream-color-temp', (_event, id: string, value: number) => {
     if (typeof id === 'string' && typeof value === 'number') {
+      manual([id])
       lightManager.setColorTemp(id, value)
     }
   })
@@ -85,16 +99,19 @@ export function setupIPC(
 
   ipcMain.handle('set-color', async (_event, id: string, color: ColorHS) => {
     if (typeof id !== 'string' || !color) return false
+    manual([id])
     return lightManager.setColor(id, color.h, color.s, color.v)
   })
 
   ipcMain.handle('set-work-mode', async (_event, id: string, mode: 'white' | 'colour' | 'scene' | 'music') => {
     if (typeof id !== 'string') return false
+    manual([id])
     return lightManager.setWorkMode(id, mode)
   })
 
   ipcMain.handle('set-scene', async (_event, id: string, sceneNum: number) => {
     if (typeof id !== 'string' || typeof sceneNum !== 'number') return false
+    manual([id])
     return lightManager.setScene(id, sceneNum)
   })
 
@@ -105,21 +122,25 @@ export function setupIPC(
 
   ipcMain.handle('set-all', async (_event, on: boolean) => {
     if (typeof on !== 'boolean') return []
+    lightManager.markAllManual()
     return lightManager.setAll(on)
   })
 
   ipcMain.handle('set-group-power', async (_event, deviceIds: string[], on: boolean) => {
     if (!Array.isArray(deviceIds) || typeof on !== 'boolean') return []
+    manual(deviceIds)
     return lightManager.setGroupPower(deviceIds, on)
   })
 
   ipcMain.handle('set-group-brightness', async (_event, deviceIds: string[], value: number) => {
     if (!Array.isArray(deviceIds) || typeof value !== 'number') return []
+    manual(deviceIds)
     return lightManager.setGroupBrightness(deviceIds, value)
   })
 
   ipcMain.handle('set-group-color-temp', async (_event, deviceIds: string[], value: number) => {
     if (!Array.isArray(deviceIds) || typeof value !== 'number') return []
+    manual(deviceIds)
     return lightManager.setGroupColorTemp(deviceIds, value)
   })
 
@@ -162,6 +183,7 @@ export function setupIPC(
   ipcMain.handle(
     'apply-preset',
     async (_event, presetId: string, targetType: 'all' | 'room' | 'light', targetId?: string) => {
+      manual(lumosStore.resolveTargetIds(targetType, targetId))
       return lumosStore.applyPreset(presetId, targetType, targetId)
     }
   )
@@ -191,6 +213,88 @@ export function setupIPC(
   ipcMain.handle('save-sunrise-alarm', async (_event, alarm: SunriseAlarm | null) => {
     lumosStore.saveSunriseAlarm(alarm)
     return true
+  })
+
+  // Effects IPC Handlers
+  const send = (channel: string, payload: unknown): void => {
+    const win = getMainWindow()
+    if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+  }
+  effectManager.on('snapshot', (snapshot) => send('effects-update', snapshot))
+  effectManager.on('paused', (notice) => send('effect-paused', notice))
+  effectManager.on('live', (live) => send('effects-live', live))
+
+  ipcMain.handle('effects-get', async () => effectManager.snapshot())
+
+  ipcMain.handle('effects-set-enabled', async (_event, id: string, on: boolean) => {
+    if (typeof id !== 'string' || typeof on !== 'boolean') return effectManager.snapshot()
+    return effectManager.setEnabled(id, on)
+  })
+
+  ipcMain.handle('effects-update-settings', async (_event, id: string, patch: unknown) => {
+    if (typeof id !== 'string') return effectManager.snapshot()
+    return effectManager.updateSettings(id, patch)
+  })
+
+  ipcMain.handle('effects-update-global', async (_event, patch: unknown) => {
+    return effectManager.updateGlobal(patch)
+  })
+
+  ipcMain.handle('effects-resume-lights', async (_event, id: string, lightIds: string[]) => {
+    if (typeof id !== 'string' || !Array.isArray(lightIds)) return effectManager.snapshot()
+    return effectManager.resumeLight(
+      id,
+      lightIds.filter((x) => typeof x === 'string')
+    )
+  })
+
+  ipcMain.handle('effects-action', async (_event, id: string, action: string, payload: unknown) => {
+    if (typeof id !== 'string' || typeof action !== 'string') return { ok: false, error: 'Invalid request' }
+    try {
+      return { ok: true, result: await effectManager.action(id, action, payload) }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Action failed' }
+    }
+  })
+
+  // Energy IPC Handlers (all figures are estimates)
+  const isRange = (r: unknown): r is EnergyRange => r === 'today' || r === '7d' || r === '30d'
+
+  ipcMain.handle('energy-report', async (_event, range: unknown) => {
+    return energyTracker.report(isRange(range) ? range : 'today')
+  })
+
+  ipcMain.handle('energy-set-watts', async (_event, id: string, watts: number) => {
+    if (typeof id !== 'string' || typeof watts !== 'number' || !Number.isFinite(watts)) return false
+    energyTracker.setRatedWatts(id, watts)
+    return true
+  })
+
+  ipcMain.handle('energy-set-price', async (_event, price: unknown) => {
+    energyTracker.setPrice(price === null ? null : price)
+    return true
+  })
+
+  ipcMain.handle('energy-reset', async () => {
+    energyTracker.reset()
+    return true
+  })
+
+  ipcMain.handle('energy-export', async () => {
+    const win = getMainWindow()
+    const today = new Date().toISOString().slice(0, 10)
+    const result = await dialog.showSaveDialog(win || (undefined as any), {
+      title: 'Export energy estimates',
+      defaultPath: `lumos-energy-${today}.csv`,
+      filters: [{ name: 'CSV', extensions: ['csv'] }]
+    })
+    if (result.canceled || !result.filePath) return { canceled: true }
+    try {
+      writeFileSync(result.filePath, energyTracker.toCsv(), 'utf-8')
+      return { canceled: false, success: true }
+    } catch (err: any) {
+      return { canceled: false, success: false, error: err?.message || 'Could not save the file' }
+    }
   })
 
   // HomeKit IPC Handlers

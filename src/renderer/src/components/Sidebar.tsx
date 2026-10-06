@@ -5,6 +5,8 @@ import {
   Layers,
   Sparkles,
   Clock,
+  WandSparkles,
+  Gauge,
   Settings,
   Plus,
   PanelLeftClose
@@ -20,6 +22,7 @@ export interface SidebarProps {
   lights: NormalizedLightState[]
   sceneCount: number
   activeAutomationCount: number
+  activeEffectCount: number
   onSelectView: (viewId: string) => void
   onAddRoom: () => void
   onOpenSettings: () => void
@@ -33,7 +36,7 @@ export interface SidebarProps {
  * 240px pinned translucent pane:
  * - Layer 1: Window Sidebar (surface-sidebar: rgba(14, 14, 18, 0.72) with 24px backdrop blur)
  * - Brand Lockup: TrafficLights, Lumos aperture mark, Outfit wordmark
- * - Navigation: Home, dynamic user Rooms with Add affordance, Scenes, Automations
+ * - Navigation: Home, dynamic user Rooms with Add affordance, Scenes, Automations, Effects, Energy
  * - Bottom Pinned: Settings
  * - Responsive collapse behavior below 880px with accessible overlay scrim
  */
@@ -43,6 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   lights,
   sceneCount,
   activeAutomationCount,
+  activeEffectCount,
   onSelectView,
   onAddRoom,
   onOpenSettings,
@@ -266,6 +270,61 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {activeAutomationCount}
             </span>
           )}
+        </button>
+
+        {/* Section: Effects */}
+        <button
+          type="button"
+          onClick={() => {
+            onSelectView('effects')
+            if (isCompact) onToggleCollapse()
+          }}
+          className={`group w-full h-9 px-3 rounded-[10px] flex items-center justify-between transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/80 ${
+            currentView === 'effects'
+              ? 'bg-white/[0.12] text-white shadow-sm'
+              : 'text-zinc-300 hover:text-white hover:bg-white/[0.05]'
+          }`}
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <WandSparkles
+              className={`w-4 h-4 transition-colors flex-shrink-0 ${
+                currentView === 'effects'
+                  ? 'text-amber-400'
+                  : 'text-zinc-400 group-hover:text-zinc-200'
+              }`}
+            />
+            <span className="text-[13px] font-medium tracking-tight truncate">Effects</span>
+          </div>
+          {activeEffectCount > 0 && (
+            <span className="text-xs font-mono px-1.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300">
+              {activeEffectCount}
+            </span>
+          )}
+        </button>
+
+        {/* Section: Energy */}
+        <button
+          type="button"
+          onClick={() => {
+            onSelectView('energy')
+            if (isCompact) onToggleCollapse()
+          }}
+          className={`group w-full h-9 px-3 rounded-[10px] flex items-center justify-between transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/80 ${
+            currentView === 'energy'
+              ? 'bg-white/[0.12] text-white shadow-sm'
+              : 'text-zinc-300 hover:text-white hover:bg-white/[0.05]'
+          }`}
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Gauge
+              className={`w-4 h-4 transition-colors flex-shrink-0 ${
+                currentView === 'energy'
+                  ? 'text-amber-400'
+                  : 'text-zinc-400 group-hover:text-zinc-200'
+              }`}
+            />
+            <span className="text-[13px] font-medium tracking-tight truncate">Energy</span>
+          </div>
         </button>
       </div>
 

@@ -1,0 +1,10 @@
+{
+  "Event": "GoalScored",
+  "Data": {
+    "GoalSpeed": 64.1, "GoalTime": 40.2,
+    "ImpactLocation": { "X": 10, "Y": 2944, "Z": 120 },
+    "Scorer": { "Name": "Driver Two", "Shortcut": 2, "TeamNum": 1 },
+    "Assister": { "Name": "Driver Three", "Shortcut": 3, "TeamNum": 1 },
+    "BallLastTouch": { "Player": { "Name": "Driver Two", "Shortcut": 2, "TeamNum": 1 }, "Speed": 98 }
+  }
+}

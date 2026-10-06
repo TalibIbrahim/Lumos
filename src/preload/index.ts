@@ -6,7 +6,12 @@ import {
   Schedule,
   ColorHS,
   DeviceMetadata,
-  SunriseAlarm
+  SunriseAlarm,
+  EffectsSnapshotData,
+  EffectPausedNotice,
+  EffectActionResult,
+  EnergyRangeName,
+  EnergyReportData
 } from '../main/types'
 
 export interface HomeKitInfo {
@@ -99,6 +104,24 @@ export interface LumosAPI {
   startDemoMode: () => Promise<NormalizedLightState[]>
   getIsDemoMode: () => Promise<boolean>
   openExternalUrl: (url: string) => Promise<boolean>
+
+  // Effects
+  getEffects: () => Promise<EffectsSnapshotData>
+  setEffectEnabled: (id: string, on: boolean) => Promise<EffectsSnapshotData>
+  updateEffectSettings: (id: string, patch: Record<string, unknown>) => Promise<EffectsSnapshotData>
+  updateEffectsGlobal: (patch: Record<string, unknown>) => Promise<EffectsSnapshotData>
+  resumeEffectLights: (id: string, lightIds: string[]) => Promise<EffectsSnapshotData>
+  effectAction: (id: string, action: string, payload?: unknown) => Promise<EffectActionResult>
+  onEffectsUpdate: (callback: (snapshot: EffectsSnapshotData) => void) => () => void
+  onEffectPaused: (callback: (notice: EffectPausedNotice) => void) => () => void
+  onEffectsLive: (callback: (live: { effectId: string; payload: any }) => void) => () => void
+
+  // Energy (estimates)
+  getEnergyReport: (range: EnergyRangeName) => Promise<EnergyReportData>
+  setEnergyWatts: (lightId: string, watts: number) => Promise<boolean>
+  setEnergyPrice: (price: { perKwh: number; currency: string } | null) => Promise<boolean>
+  resetEnergy: () => Promise<boolean>
+  exportEnergy: () => Promise<{ canceled: boolean; success?: boolean; error?: string }>
 
   // Window & System
   getLaunchAtLogin: () => Promise<boolean>
@@ -205,6 +228,34 @@ const api: LumosAPI = {
   startDemoMode: (): Promise<NormalizedLightState[]> => ipcRenderer.invoke('start-demo-mode'),
   getIsDemoMode: (): Promise<boolean> => ipcRenderer.invoke('get-is-demo-mode'),
   openExternalUrl: (url: string): Promise<boolean> => ipcRenderer.invoke('open-external-url', url),
+
+  getEffects: () => ipcRenderer.invoke('effects-get'),
+  setEffectEnabled: (id, on) => ipcRenderer.invoke('effects-set-enabled', id, on),
+  updateEffectSettings: (id, patch) => ipcRenderer.invoke('effects-update-settings', id, patch),
+  updateEffectsGlobal: (patch) => ipcRenderer.invoke('effects-update-global', patch),
+  resumeEffectLights: (id, lightIds) => ipcRenderer.invoke('effects-resume-lights', id, lightIds),
+  effectAction: (id, action, payload) => ipcRenderer.invoke('effects-action', id, action, payload),
+  onEffectsUpdate: (callback) => {
+    const sub = (_event: IpcRendererEvent, snapshot: EffectsSnapshotData): void => callback(snapshot)
+    ipcRenderer.on('effects-update', sub)
+    return () => ipcRenderer.removeListener('effects-update', sub)
+  },
+  onEffectPaused: (callback) => {
+    const sub = (_event: IpcRendererEvent, notice: EffectPausedNotice): void => callback(notice)
+    ipcRenderer.on('effect-paused', sub)
+    return () => ipcRenderer.removeListener('effect-paused', sub)
+  },
+  onEffectsLive: (callback) => {
+    const sub = (_event: IpcRendererEvent, live: { effectId: string; payload: any }): void => callback(live)
+    ipcRenderer.on('effects-live', sub)
+    return () => ipcRenderer.removeListener('effects-live', sub)
+  },
+
+  getEnergyReport: (range) => ipcRenderer.invoke('energy-report', range),
+  setEnergyWatts: (lightId, watts) => ipcRenderer.invoke('energy-set-watts', lightId, watts),
+  setEnergyPrice: (price) => ipcRenderer.invoke('energy-set-price', price),
+  resetEnergy: () => ipcRenderer.invoke('energy-reset'),
+  exportEnergy: () => ipcRenderer.invoke('energy-export'),
 
   getLaunchAtLogin: (): Promise<boolean> => ipcRenderer.invoke('get-launch-at-login'),
   setLaunchAtLogin: (enabled: boolean): Promise<boolean> =>

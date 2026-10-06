@@ -5,6 +5,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import crypto from 'crypto'
 import { LightManager } from './devices/LightManager'
 import { lumosStore } from './store'
+import type { EffectManager } from './effects/EffectManager'
 
 export interface WebhookConfig {
   port: number
@@ -15,6 +16,7 @@ export class WebhookServer {
   private server: http.Server | null = null
   private config: WebhookConfig | null = null
   private lightManager: LightManager | null = null
+  private effectManager: EffectManager | null = null
   private configFile: string = ''
 
   constructor() {
@@ -73,6 +75,10 @@ export class WebhookServer {
     }
   }
 
+  public setEffectManager(effectManager: EffectManager): void {
+    this.effectManager = effectManager
+  }
+
   public start(lightManager: LightManager): void {
     if (this.server) return
     this.lightManager = lightManager
@@ -117,6 +123,12 @@ export class WebhookServer {
         const statuses = this.lightManager?.getAllStates() || []
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: true, data: statuses }))
+        return
+      }
+
+      // GET /api/v1/effects and GET|POST /api/v1/effects/{id}[/on|/off|/toggle]
+      if (pathname === '/api/v1/effects' || pathname.startsWith('/api/v1/effects/')) {
+        await this.handleEffectsRequest(req, res, pathname, urlObj)
         return
       }
 
@@ -202,11 +214,13 @@ export class WebhookServer {
     // 2. Set All Power
     if (action === 'all' || (payload.all !== undefined && payload.power !== undefined)) {
       const power = payload.power !== undefined ? Boolean(payload.power) : action === 'all-on'
+      this.lightManager.markAllManual()
       return this.lightManager.setAll(power)
     }
 
     // 3. Toggle
     if (action === 'toggle' && targetId) {
+      this.lightManager.markManual([String(targetId)])
       return this.lightManager.toggleLight(targetId)
     }
 
@@ -215,6 +229,7 @@ export class WebhookServer {
       const presetId = payload.presetId || payload.scene
       const targetType = targetId ? 'light' : roomId ? 'room' : 'all'
       const id = targetId || roomId
+      this.lightManager.markManual(lumosStore.resolveTargetIds(targetType, id))
       return lumosStore.applyPreset(presetId, targetType, id)
     }
 
@@ -224,6 +239,7 @@ export class WebhookServer {
       if (!light) {
         throw new Error(`Device not found: ${targetId}`)
       }
+      this.lightManager.markManual([light.id])
 
       if (payload.power !== undefined) {
         await light.setPower(Boolean(payload.power))
@@ -250,6 +266,7 @@ export class WebhookServer {
       if (!room) {
         throw new Error(`Room not found: ${roomId}`)
       }
+      this.lightManager.markManual(room.deviceIds)
 
       if (payload.power !== undefined) {
         await this.lightManager.setGroupPower(room.deviceIds, Boolean(payload.power))
@@ -265,78 +282,120 @@ export class WebhookServer {
 
     // 7. General Power or Brightness on All
     if (payload.power !== undefined) {
+      this.lightManager.markAllManual()
       return this.lightManager.setAll(Boolean(payload.power))
     }
 
     return { received: payload }
   }
 
+  /**
+   * Flashes lights as a transient overlay in the compositor. The lights return
+   * to whatever is composed underneath when the flash ends, so changes made
+   * during the flash are kept.
+   */
   public async flashLights(
     targetId?: string,
     roomId?: string,
     count: number = 2,
     flashColor?: { h: number; s: number; v?: number } | null
   ): Promise<boolean> {
-    if (!this.lightManager) return false
+    if (!this.lightManager || !this.effectManager) return false
 
-    const lights = targetId
-      ? [this.lightManager.getLight(targetId)].filter(Boolean)
-      : roomId
-      ? this.lightManager.getAllLights().filter((l) => l.room === roomId)
-      : this.lightManager.getAllLights()
+    let ids: string[]
+    if (targetId) {
+      ids = this.lightManager.getLight(String(targetId)) ? [String(targetId)] : []
+    } else if (roomId) {
+      const room = lumosStore
+        .getData()
+        .rooms.find((r) => r.id === roomId || r.name.toLowerCase() === String(roomId).toLowerCase())
+      const members = new Set(room?.deviceIds || [])
+      ids = this.lightManager
+        .getAllLights()
+        .filter((l) => members.has(l.id) || l.room === roomId)
+        .map((l) => l.id)
+    } else {
+      ids = this.lightManager.getAllLights().map((l) => l.id)
+    }
+    if (ids.length === 0) return false
 
-    if (lights.length === 0) return false
-
-    // Save initial states
-    const savedStates = lights.map((l: any) => ({
-      light: l,
-      power: l.power,
-      brightness: l.brightness,
-      colorTemp: l.colorTemp,
-      color: l.color,
-      mode: l.mode
-    }))
-
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+    const color =
+      flashColor && typeof flashColor === 'object'
+        ? {
+            h: Math.max(0, Math.min(360, Number(flashColor.h) || 0)),
+            s: Math.max(0, Math.min(100, Number(flashColor.s ?? 100)))
+          }
+        : null
 
     try {
-      for (let i = 0; i < count; i++) {
-        // Pulse On / Vivid
-        for (const { light } of savedStates) {
-          if (flashColor && light.capabilities.hasColor) {
-            light.setColor(flashColor.h, flashColor.s, flashColor.v || 100).catch(() => {})
-          } else {
-            light.setBrightness(100).catch(() => {})
-          }
-        }
-        await sleep(220)
-
-        // Pulse Off / Low
-        for (const { light } of savedStates) {
-          light.setPower(false).catch(() => {})
-        }
-        await sleep(220)
-      }
-
-      // Restore initial states
-      for (const { light, power, brightness, colorTemp, color, mode } of savedStates) {
-        if (power) {
-          await light.setPower(true)
-          if (mode === 'colour' && color && light.capabilities.hasColor) {
-            await light.setColor(color.h, color.s, color.v)
-          } else {
-            await light.setBrightness(brightness)
-            await light.setColorTemp(colorTemp)
-          }
-        } else {
-          await light.setPower(false)
-        }
-      }
+      await this.effectManager.flash({
+        label: 'Alert',
+        targets: ids,
+        color,
+        count: Math.max(1, Math.min(10, Math.round(Number(count) || 2))),
+        onMs: 250,
+        offMs: 250,
+        includeOff: true
+      })
       return true
     } catch (err) {
       console.error('[Lumos Webhook] Error during flash routine:', err)
       return false
     }
+  }
+
+  private async handleEffectsRequest(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    pathname: string,
+    urlObj: URL
+  ): Promise<void> {
+    const reply = (status: number, body: unknown): void => {
+      res.writeHead(status, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(body))
+    }
+    if (!this.effectManager) return reply(503, { error: 'Effects are not ready' })
+
+    const summary = (): unknown =>
+      this.effectManager!.snapshot().effects.map((e) => ({
+        id: e.id,
+        label: e.label,
+        enabled: e.settings.enabled,
+        status: e.status
+      }))
+
+    const parts = pathname.split('/').filter(Boolean) // api, v1, effects, id?, verb?
+    const id = parts[3]
+    const verb = parts[4]
+    if (!id) {
+      if (req.method !== 'GET') return reply(405, { error: 'Method not allowed' })
+      return reply(200, { success: true, data: summary() })
+    }
+
+    const effect = this.effectManager.get(id)
+    if (!effect) return reply(404, { error: `Unknown effect: ${id}` })
+
+    let enabled: boolean | undefined
+    if (verb === 'on') enabled = true
+    else if (verb === 'off') enabled = false
+    else if (verb === 'toggle') enabled = !effect.isEnabled()
+    else if (verb !== undefined) return reply(404, { error: 'Endpoint not found' })
+    else if (req.method === 'POST') {
+      try {
+        const body = await this.readRequestBody(req)
+        const parsed = body ? JSON.parse(body) : {}
+        if (typeof parsed?.enabled === 'boolean') enabled = parsed.enabled
+      } catch {
+        return reply(400, { error: 'Invalid JSON body' })
+      }
+    } else {
+      const q = urlObj.searchParams.get('enabled')
+      if (q === 'true') enabled = true
+      if (q === 'false') enabled = false
+    }
+
+    if (enabled !== undefined) await this.effectManager.setEnabled(id, enabled)
+    return reply(200, { success: true, data: { id, enabled: effect.isEnabled(), status: effect.getStatus() } })
   }
 
   public stop(): void {

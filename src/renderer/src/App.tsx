@@ -4,7 +4,9 @@ import {
   LightbulbOff,
   RefreshCw,
   Layers,
-  Plus
+  Plus,
+  ShieldCheck,
+  Download
 } from 'lucide-react'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
@@ -17,11 +19,13 @@ import { SettingsSheet } from './components/SettingsSheet'
 import { RoomsSheet } from './components/RoomsSheet'
 import { ScenesView } from './components/ScenesView'
 import { TileContextMenu } from './components/TileContextMenu'
-import { AmbientAurora } from './components/AmbientAurora'
+import { AmbientBackdrop } from './components/AmbientBackdrop'
 import { GlassSurface } from './components/ui/GlassSurface'
 import { GlassButton } from './components/ui/GlassButton'
 import { ErrorBoundary } from './components/ui/ErrorBoundary'
 import { OnboardingView } from './components/OnboardingView'
+import { EffectsView } from './components/EffectsView'
+import { EnergyView } from './components/EnergyView'
 import {
   NormalizedLightState,
   LumosStoreData,
@@ -29,7 +33,9 @@ import {
   DeviceMetadata,
   Preset,
   RoomGroup,
-  Schedule
+  Schedule,
+  EffectsSnapshotData,
+  EffectPausedNotice
 } from './types'
 import { springs } from './lib/constants'
 
@@ -37,12 +43,14 @@ interface ToastState {
   id: number
   message: string
   onUndo?: () => void
+  actionLabel?: string
 }
 
 export const App: React.FC = () => {
   const shouldReduceMotion = useReducedMotion()
   const [lights, setLights] = useState<NormalizedLightState[]>([])
   const [store, setStore] = useState<LumosStoreData | null>(null)
+  const [effects, setEffects] = useState<EffectsSnapshotData | null>(null)
   const [loading, setLoading] = useState(true)
   const [hasConfig, setHasConfig] = useState<boolean>(true)
   const [isDemoMode, setIsDemoMode] = useState<boolean>(false)
@@ -77,13 +85,55 @@ export const App: React.FC = () => {
   })
 
   // Show Toast helper
-  const showToast = useCallback((message: string, onUndo?: () => void) => {
+  const showToast = useCallback((message: string, onUndo?: () => void, actionLabel?: string) => {
     const id = Date.now()
-    setToast({ id, message, onUndo })
+    setToast({ id, message, onUndo, actionLabel })
     setTimeout(() => {
       setToast((prev) => (prev?.id === id ? null : prev))
     }, 4500)
   }, [])
+
+  // Effects: status updates, and a notice when a hand change pauses an effect on a light
+  useEffect(() => {
+    const api = window.lumos
+    if (!api?.getEffects) return undefined
+    api.getEffects().then(setEffects).catch(() => setEffects(null))
+    const unsubUpdate = api.onEffectsUpdate((snapshot) => setEffects(snapshot))
+    const unsubPaused = api.onEffectPaused((notice: EffectPausedNotice) => {
+      const names =
+        notice.lightNames.length <= 2
+          ? notice.lightNames.join(' and ')
+          : `${notice.lightNames.length} lights`
+      showToast(
+        `${notice.effectLabel} paused for ${names}`,
+        () => void api.resumeEffectLights(notice.effectId, notice.lightIds),
+        'Resume'
+      )
+    })
+    return () => {
+      unsubUpdate()
+      unsubPaused()
+    }
+  }, [showToast])
+
+  const handleToggleEffect = useCallback((id: string, on: boolean) => {
+    setEffects((prev) =>
+      prev
+        ? {
+            ...prev,
+            effects: prev.effects.map((e) =>
+              e.id === id ? { ...e, settings: { ...e.settings, enabled: on }, status: on ? 'waiting' : 'off' } : e
+            )
+          }
+        : prev
+    )
+    window.lumos?.setEffectEnabled(id, on).then(setEffects).catch(() => {})
+  }, [])
+
+  const activeEffectCount = useMemo(
+    () => (effects ? effects.effects.filter((e) => e.settings.enabled).length : 0),
+    [effects]
+  )
 
   // Responsive Breakpoint Observer (< 880px)
   useEffect(() => {
@@ -529,6 +579,36 @@ export const App: React.FC = () => {
       }
     }
 
+    if (currentView === 'effects') {
+      const live = effects?.effects.filter((e) => e.status === 'active').length ?? 0
+      return {
+        title: 'Effects',
+        subtitle:
+          activeEffectCount === 0
+            ? 'All effects off'
+            : `${activeEffectCount} on${live > 0 ? `, ${live} active now` : ''}`,
+        primaryActionLabel: undefined,
+        primaryActionIcon: ShieldCheck,
+        onPrimaryAction: undefined,
+        anyActive: activeLights > 0,
+        totalLights,
+        onTogglePower: () => handleSetAll(activeLights === 0)
+      }
+    }
+
+    if (currentView === 'energy') {
+      return {
+        title: 'Energy',
+        subtitle: 'Estimated from rated wattage',
+        primaryActionLabel: 'Export',
+        primaryActionIcon: Download,
+        onPrimaryAction: () => void window.lumos?.exportEnergy(),
+        anyActive: activeLights > 0,
+        totalLights,
+        onTogglePower: () => handleSetAll(activeLights === 0)
+      }
+    }
+
     if (currentView === 'automations') {
       return {
         title: 'Automations',
@@ -563,14 +643,16 @@ export const App: React.FC = () => {
     totalLights,
     isDemoMode,
     handleToggleRoom,
-    handleSetAll
+    handleSetAll,
+    effects,
+    activeEffectCount
   ])
 
   // If no devices configured and not exploring demo, show first-run onboarding screen
   if (!loading && !hasConfig && !isDemoMode && lights.length === 0) {
     return (
       <div className="h-screen w-screen overflow-hidden flex bg-[#09090b] text-zinc-100 font-sans selection:bg-amber-400/30 selection:text-white">
-        <AmbientAurora lights={[]} />
+        <AmbientBackdrop lights={[]} />
         <OnboardingView
           onComplete={fetchStatusAndStore}
           onExploreDemo={handleExploreDemo}
@@ -581,8 +663,8 @@ export const App: React.FC = () => {
 
   return (
     <div className="h-screen w-screen overflow-hidden flex bg-[#09090b] text-zinc-100 font-sans selection:bg-amber-400/30 selection:text-white">
-      {/* Dynamic React Bits Aurora Background */}
-      <AmbientAurora lights={visibleLights} />
+      {/* Ambient background tinted by the lights that are on */}
+      <AmbientBackdrop lights={visibleLights} />
 
       {/* Collapsible Sidebar */}
       <Sidebar
@@ -591,6 +673,7 @@ export const App: React.FC = () => {
         lights={visibleLights}
         sceneCount={scenes.length}
         activeAutomationCount={activeAutomationCount}
+        activeEffectCount={activeEffectCount}
         onSelectView={(viewId) => {
           setCurrentView(viewId)
         }}
@@ -649,7 +732,7 @@ export const App: React.FC = () => {
                 ))}
               </div>
             </div>
-          ) : visibleLights.length === 0 ? (
+          ) : visibleLights.length === 0 && currentView !== 'effects' && currentView !== 'energy' ? (
             /* Calm Empty State */
             <motion.div
               initial={shouldReduceMotion ? false : { opacity: 0, y: 12 }}
@@ -827,6 +910,19 @@ export const App: React.FC = () => {
                 />
               )}
 
+              {/* VIEW 5: EFFECTS */}
+              {currentView === 'effects' && (
+                <EffectsView
+                  snapshot={effects}
+                  lights={visibleLights}
+                  isDemoMode={isDemoMode}
+                  onToggle={handleToggleEffect}
+                />
+              )}
+
+              {/* VIEW 6: ENERGY */}
+              {currentView === 'energy' && <EnergyView lights={visibleLights} />}
+
               {/* VIEW 4: AUTOMATIONS */}
               {currentView === 'automations' && (
                 <AutomationsView
@@ -865,7 +961,7 @@ export const App: React.FC = () => {
                   }}
                   className="text-xs font-semibold text-amber-300 hover:text-amber-200 underline cursor-pointer transition-colors"
                 >
-                  Undo
+                  {toast.actionLabel ?? 'Undo'}
                 </button>
               )}
             </div>

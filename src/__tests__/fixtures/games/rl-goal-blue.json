@@ -1,0 +1,10 @@
+{
+  "Event": "GoalScored",
+  "Data": {
+    "MatchGuid": "A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6",
+    "GoalSpeed": 87.3, "GoalTime": 127.5,
+    "ImpactLocation": { "X": 0, "Y": -2944, "Z": 320 },
+    "Scorer": { "Name": "Driver One", "Shortcut": 1, "TeamNum": 0 },
+    "BallLastTouch": { "Player": { "Name": "Driver One", "Shortcut": 1, "TeamNum": 0 }, "Speed": 125 }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "Event": "UpdateState",
+  "Data": {
+    "MatchGuid": "A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6",
+    "Players": [
+      { "Name": "Driver One", "PrimaryId": "Steam|123|0", "Shortcut": 1, "TeamNum": 0, "Score": 125, "Goals": 1, "Shots": 2, "Assists": 0, "Saves": 1, "Touches": 14, "CarTouches": 3, "Demos": 0, "bHasCar": true, "Speed": 1200, "Boost": 45, "bBoosting": true, "bOnGround": true, "bOnWall": false, "bPowersliding": false, "bDemolished": false, "bSupersonic": false },
+      { "Name": "Driver Two", "PrimaryId": "Epic|456|0", "Shortcut": 2, "TeamNum": 1, "Score": 80, "Goals": 0, "Shots": 1, "Assists": 0, "Saves": 0, "Touches": 9, "CarTouches": 1, "Demos": 1 }
+    ],
+    "Game": {
+      "Teams": [
+        { "Name": "Blue", "TeamNum": 0, "Score": 1, "ColorPrimary": "1873FF", "ColorSecondary": "0000AA" },
+        { "Name": "Orange", "TeamNum": 1, "Score": 0, "ColorPrimary": "FF8A15", "ColorSecondary": "AA5500" }
+      ],
+      "TimeSeconds": 180, "bOvertime": false,
+      "Ball": { "Speed": 850.5, "TeamNum": 0 },
+      "bReplay": false, "bHasWinner": false, "Winner": "", "Arena": "Stadium_P",
+      "bHasTarget": true, "Target": { "Name": "Driver One", "Shortcut": 1, "TeamNum": 0 }
+    }
+  }
+}

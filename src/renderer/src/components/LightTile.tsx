@@ -297,6 +297,14 @@ const LightTileComponent: React.FC<LightTileProps> = ({
               onPointerUp={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
             >
+              {!isDragging && online && light.effect && (
+                <span
+                  className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-black/30 text-amber-200 border border-amber-300/25 max-w-[96px] truncate"
+                  title={`${light.effect} is shaping this light`}
+                >
+                  {light.effect}
+                </span>
+              )}
               {isDragging ? (
                 <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded-full shadow-sm bg-white/20 text-white">
                   {localBri}%
