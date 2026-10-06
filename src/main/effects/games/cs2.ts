@@ -122,9 +122,10 @@ export class Cs2Listener extends EventEmitter {
     return new Promise((resolve, reject) => {
       const server = http.createServer((req, res) => this.handle(req, res))
       server.on('error', (err) => {
+        // The returned promise reports the failure; emitting 'error' here with
+        // no listener would crash the app
         this.server = null
         reject(err)
-        this.emit('error', err)
       })
       server.listen(this.port, '127.0.0.1', () => {
         this.server = server

@@ -185,9 +185,15 @@ export class Light extends EventEmitter {
   private initTuyaClient(): void {
     try {
       if (this.tuya) {
+        const old = this.tuya
         try {
-          this.tuya.removeAllListeners()
-          this.tuya.disconnect()
+          old.removeAllListeners()
+          // A connection attempt still in progress on the old client can time
+          // out later and emit an error. Without a listener that error would
+          // be thrown as an uncaught exception, so keep a quiet one attached.
+          // The attempt is left to time out on its own so anything awaiting it still settles.
+          old.on('error', () => {})
+          old.disconnect()
         } catch {
           // ignore disconnect error
         }

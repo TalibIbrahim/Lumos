@@ -1,6 +1,7 @@
 import './cryptoPolyfill.js'
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
+import { appendFileSync, mkdirSync } from 'fs'
 import { is } from '@electron-toolkit/utils'
 import { migrateLegacyData } from './migration'
 import { LightManager } from './devices/LightManager'
@@ -25,6 +26,25 @@ let energyTracker: EnergyTracker | null = null
 let remoteManager: RemoteManager | null = null
 let isQuitting = false
 let cleanupDone = false
+
+/**
+ * Last line of defence: a stray error from a network library (for example a
+ * light's connection timing out) is written to <user data>/logs/main.log
+ * instead of interrupting with an error dialog. The app keeps running either way.
+ */
+function logUnexpected(kind: string, err: unknown): void {
+  const text = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err)
+  console.error(`[Lumos] ${kind}:`, text)
+  try {
+    const dir = join(app.getPath('userData'), 'logs')
+    mkdirSync(dir, { recursive: true })
+    appendFileSync(join(dir, 'main.log'), `[${new Date().toISOString()}] ${kind}: ${text}\n`)
+  } catch {
+    // Logging must never fail loudly
+  }
+}
+process.on('uncaughtException', (err) => logUnexpected('Uncaught exception', err))
+process.on('unhandledRejection', (reason) => logUnexpected('Unhandled rejection', reason))
 
 function getAppIconPath(): string {
   if (process.platform === 'win32') {
