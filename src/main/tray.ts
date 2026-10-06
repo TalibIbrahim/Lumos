@@ -4,6 +4,15 @@ import { existsSync } from 'fs'
 import { LightManager } from './devices/LightManager'
 
 let tray: Tray | null = null
+let rebuildMenu: (() => void) | null = null
+let pendingUpdate: { version: string; install: () => void } | null = null
+
+/** Shows a "Restart to update" item in the tray menu once an update is downloaded. */
+export function setTrayUpdateReady(version: string, install: () => void): void {
+  pendingUpdate = { version, install }
+  tray?.setToolTip(`Lumos (update ${version} ready)`)
+  rebuildMenu?.()
+}
 
 // Simple 16x16 PNG icon fallback generated dynamically if file doesn't exist
 function createFallbackIcon(): NativeImage {
@@ -51,39 +60,50 @@ export function createTray(mainWindow: BrowserWindow, lightManager: LightManager
   tray = new Tray(icon)
   tray.setToolTip('Lumos')
 
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: 'Show Lumos',
-      click: (): void => {
-        if (!mainWindow.isVisible()) {
-          mainWindow.show()
+  const buildMenu = (): Menu =>
+    Menu.buildFromTemplate([
+      ...(pendingUpdate
+        ? [
+            {
+              label: `Restart to update to ${pendingUpdate.version}`,
+              click: (): void => pendingUpdate?.install()
+            },
+            { type: 'separator' as const }
+          ]
+        : []),
+      {
+        label: 'Show Lumos',
+        click: (): void => {
+          if (!mainWindow.isVisible()) {
+            mainWindow.show()
+          }
+          mainWindow.focus()
         }
-        mainWindow.focus()
+      },
+      { type: 'separator' },
+      {
+        label: 'All On',
+        click: (): void => {
+          lightManager.setAll(true)
+        }
+      },
+      {
+        label: 'All Off',
+        click: (): void => {
+          lightManager.setAll(false)
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Quit',
+        click: (): void => {
+          app.quit()
+        }
       }
-    },
-    { type: 'separator' },
-    {
-      label: 'All On',
-      click: (): void => {
-        lightManager.setAll(true)
-      }
-    },
-    {
-      label: 'All Off',
-      click: (): void => {
-        lightManager.setAll(false)
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Quit',
-      click: (): void => {
-        app.quit()
-      }
-    }
-  ])
+    ])
 
-  tray.setContextMenu(contextMenu)
+  rebuildMenu = (): void => tray?.setContextMenu(buildMenu())
+  rebuildMenu()
 
   const toggleWindow = (): void => {
     if (mainWindow.isVisible()) {

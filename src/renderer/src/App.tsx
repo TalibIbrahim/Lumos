@@ -116,6 +116,19 @@ export const App: React.FC = () => {
     }
   }, [showToast])
 
+  // When an update has downloaded, offer to restart into it
+  useEffect(() => {
+    const api = window.lumos
+    if (!api?.onUpdateStatus) return undefined
+    let announced = ''
+    return api.onUpdateStatus((status) => {
+      if (status.state === 'downloaded' && status.version !== announced) {
+        announced = status.version
+        showToast(`Lumos ${status.version} is ready`, () => void api.installUpdate(), 'Restart')
+      }
+    })
+  }, [showToast])
+
   const handleToggleEffect = useCallback((id: string, on: boolean) => {
     setEffects((prev) =>
       prev
