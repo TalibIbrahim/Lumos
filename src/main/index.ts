@@ -9,6 +9,7 @@ import { webhookServer } from './webhook'
 import { setupIPC } from './ipc'
 import { createTray } from './tray'
 import { lumosStore } from './store'
+import { setupAutoUpdater } from './updater'
 import { NormalizedLightState } from './types'
 
 let mainWindow: BrowserWindow | null = null
@@ -112,6 +113,9 @@ app.whenReady().then(async () => {
 
   // Setup IPC handlers
   setupIPC(lightManager, homeKitManager, () => mainWindow)
+
+  // Setup Auto-Updater
+  setupAutoUpdater(() => mainWindow)
 
   // Start local Webhook server
   webhookServer.start(lightManager)

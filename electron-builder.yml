@@ -24,4 +24,10 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+publish:
+  provider: github
+  owner: TalibIbrahim
+  repo: Lumos
+  releaseType: release
+
 

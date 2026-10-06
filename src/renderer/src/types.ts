@@ -23,3 +23,13 @@ export interface ImportResult {
   lightsCount?: number
   lights?: Array<{ id: string; name: string; product: string }>
 }
+
+export type UpdateStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'available'; version: string }
+  | { state: 'not-available' }
+  | { state: 'downloading'; percent: number }
+  | { state: 'downloaded'; version: string }
+  | { state: 'error'; message: string }
+

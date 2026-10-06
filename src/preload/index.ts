@@ -25,6 +25,15 @@ export interface WebhookInfo {
   port: number
 }
 
+export type UpdateStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'available'; version: string }
+  | { state: 'not-available' }
+  | { state: 'downloading'; percent: number }
+  | { state: 'downloaded'; version: string }
+  | { state: 'error'; message: string }
+
 export interface ImportResult {
   canceled: boolean
   success?: boolean
@@ -56,6 +65,7 @@ export interface LumosAPI {
   // Subscriptions
   onUpdate: (callback: (state: NormalizedLightState) => void) => () => void
   onStoreUpdate: (callback: (store: LumosStoreData) => void) => () => void
+  onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void
 
   // Store & Settings
   getStore: () => Promise<LumosStoreData>
@@ -75,6 +85,12 @@ export interface LumosAPI {
   getHomeKitInfo: () => Promise<HomeKitInfo>
   resetHomeKit: () => Promise<HomeKitInfo>
   getWebhookInfo: () => Promise<WebhookInfo>
+
+  // Auto-Update
+  checkForUpdates: () => Promise<any>
+  installUpdate: () => Promise<void>
+  getAppVersion: () => Promise<string>
+  getUpdateStatus: () => Promise<UpdateStatus>
 
   // Onboarding & Demo
   hasDevicesConfig: () => Promise<boolean>
@@ -145,6 +161,16 @@ const api: LumosAPI = {
     }
   },
 
+  onUpdateStatus: (callback: (status: UpdateStatus) => void): (() => void) => {
+    const subscription = (_event: IpcRendererEvent, status: UpdateStatus): void => {
+      callback(status)
+    }
+    ipcRenderer.on('update-status', subscription)
+    return () => {
+      ipcRenderer.removeListener('update-status', subscription)
+    }
+  },
+
   getStore: (): Promise<LumosStoreData> => ipcRenderer.invoke('get-store'),
   setDeviceMeta: (id: string, meta: Partial<DeviceMetadata>): Promise<boolean> =>
     ipcRenderer.invoke('set-device-meta', id, meta),
@@ -166,6 +192,11 @@ const api: LumosAPI = {
   getHomeKitInfo: (): Promise<HomeKitInfo> => ipcRenderer.invoke('get-homekit-info'),
   resetHomeKit: (): Promise<HomeKitInfo> => ipcRenderer.invoke('reset-homekit'),
   getWebhookInfo: (): Promise<WebhookInfo> => ipcRenderer.invoke('get-webhook-info'),
+
+  checkForUpdates: (): Promise<any> => ipcRenderer.invoke('check-for-updates'),
+  installUpdate: (): Promise<void> => ipcRenderer.invoke('install-update'),
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke('get-app-version'),
+  getUpdateStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('get-update-status'),
 
   hasDevicesConfig: (): Promise<boolean> => ipcRenderer.invoke('has-devices-config'),
   pickAndImportDevicesFile: (): Promise<ImportResult> => ipcRenderer.invoke('pick-and-import-devices-file'),

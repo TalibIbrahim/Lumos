@@ -16,12 +16,14 @@ import {
   Sparkles,
   Info,
   Zap,
-  Upload
+  Upload,
+  RefreshCw,
+  Download
 } from 'lucide-react'
 import { GlassSurface } from './ui/GlassSurface'
 import { GlassButton } from './ui/GlassButton'
 import { springs } from '../lib/constants'
-import { HomeKitInfo, WebhookInfo } from '../types'
+import { HomeKitInfo, WebhookInfo, UpdateStatus } from '../types'
 
 export interface SettingsSheetProps {
   isOpen: boolean
@@ -53,27 +55,50 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, o
   const [resetting, setResetting] = useState(false)
   const [flashing, setFlashing] = useState(false)
   const [importMessage, setImportMessage] = useState<string | null>(null)
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ state: 'idle' })
+  const [appVersion, setAppVersion] = useState('1.0.0')
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
 
   const loadSettingsData = useCallback(async () => {
     const api = window.lumos || window.lumen
     if (!api) return
     setLoadingHk(true)
     try {
-      const [info, loginSetting, wh] = await Promise.all([
+      const [info, loginSetting, wh, ver, upStat] = await Promise.all([
         api.getHomeKitInfo(),
         api.getLaunchAtLogin(),
-        api.getWebhookInfo ? api.getWebhookInfo() : Promise.resolve(null)
+        api.getWebhookInfo ? api.getWebhookInfo() : Promise.resolve(null),
+        api.getAppVersion ? api.getAppVersion() : Promise.resolve('1.0.0'),
+        api.getUpdateStatus ? api.getUpdateStatus() : Promise.resolve({ state: 'idle' } as UpdateStatus)
       ])
       setHkInfo(info)
       setLaunchAtLogin(loginSetting)
       if (wh) {
         setWebhookInfo(wh)
       }
+      if (ver) {
+        setAppVersion(ver)
+      }
+      if (upStat) {
+        setUpdateStatus(upStat)
+      }
     } catch (err) {
       console.error('[SettingsSheet] Error loading settings data:', err)
     } finally {
       setLoadingHk(false)
     }
+  }, [])
+
+  useEffect(() => {
+    const api = window.lumos || window.lumen
+    if (!api?.onUpdateStatus) return
+    const unsubscribe = api.onUpdateStatus((status) => {
+      setUpdateStatus(status)
+      if (status.state !== 'checking') {
+        setCheckingUpdate(false)
+      }
+    })
+    return () => unsubscribe()
   }, [])
 
   useEffect(() => {
@@ -172,6 +197,25 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, o
     } catch (err: any) {
       setImportMessage(`Error: ${err?.message || 'Failed importing file'}`)
     }
+  }
+
+  const handleCheckForUpdates = async (): Promise<void> => {
+    const api = window.lumos || window.lumen
+    if (!api?.checkForUpdates) return
+    setCheckingUpdate(true)
+    try {
+      await api.checkForUpdates()
+    } catch (err) {
+      console.warn('[SettingsSheet] Check for updates error:', err)
+    } finally {
+      setTimeout(() => setCheckingUpdate(false), 2500)
+    }
+  }
+
+  const handleInstallUpdate = async (): Promise<void> => {
+    const api = window.lumos || window.lumen
+    if (!api?.installUpdate) return
+    await api.installUpdate()
   }
 
   return (
@@ -532,18 +576,88 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, o
                     </div>
                   </div>
 
-                  {/* Group 5: About */}
+                  {/* Group 5: Software Updates */}
+                  <div className="flex flex-col gap-2">
+                    <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider px-1">
+                      Software Updates
+                    </span>
+                    <div className="flex flex-col rounded-2xl bg-white/[0.04] border border-white/[0.07] p-4 gap-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-xs font-medium text-white">Lumos Version {appVersion}</h4>
+                          <p className="text-[11px] text-zinc-400">
+                            {updateStatus.state === 'checking' || checkingUpdate
+                              ? 'Checking for updates...'
+                              : updateStatus.state === 'available'
+                              ? `New version ${updateStatus.version} available`
+                              : updateStatus.state === 'downloading'
+                              ? `Downloading update (${updateStatus.percent}%)...`
+                              : updateStatus.state === 'downloaded'
+                              ? `Version ${updateStatus.version} downloaded and ready to install.`
+                              : updateStatus.state === 'error'
+                              ? 'Up to date (or offline)'
+                              : 'Automatic background updates enabled from GitHub releases.'}
+                          </p>
+                        </div>
+                        <div>
+                          {updateStatus.state === 'downloaded' ? (
+                            <GlassButton
+                              variant="prominent"
+                              size="sm"
+                              onClick={handleInstallUpdate}
+                              className="flex items-center gap-2 bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>Restart & Update</span>
+                            </GlassButton>
+                          ) : (
+                            <GlassButton
+                              variant="standard"
+                              size="sm"
+                              onClick={handleCheckForUpdates}
+                              disabled={
+                                checkingUpdate ||
+                                updateStatus.state === 'checking' ||
+                                updateStatus.state === 'downloading'
+                              }
+                              className="flex items-center gap-2"
+                            >
+                              <RefreshCw
+                                className={`w-3.5 h-3.5 ${
+                                  checkingUpdate || updateStatus.state === 'checking'
+                                    ? 'animate-spin text-amber-400'
+                                    : ''
+                                }`}
+                              />
+                              <span>
+                                {checkingUpdate || updateStatus.state === 'checking'
+                                  ? 'Checking...'
+                                  : 'Check for Updates'}
+                              </span>
+                            </GlassButton>
+                          )}
+                        </div>
+                      </div>
+
+                      {updateStatus.state === 'downloading' && (
+                        <div className="w-full bg-white/[0.06] rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className="bg-amber-400 h-full rounded-full transition-all duration-300"
+                            style={{ width: `${updateStatus.percent}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Group 6: About */}
                   <div className="flex flex-col gap-2">
                     <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider px-1">
                       About
                     </span>
                     <div className="flex flex-col rounded-2xl bg-white/[0.04] border border-white/[0.07] divide-y divide-white/[0.06] overflow-hidden">
                       <div className="h-11 px-4 flex items-center justify-between text-xs">
-                        <span className="font-medium text-white">Lumos Version</span>
-                        <span className="font-mono text-zinc-400">1.0.0</span>
-                      </div>
-                      <div className="h-11 px-4 flex items-center justify-between text-xs">
-                        <span className="font-medium text-white">Runtime Architecture</span>
+                        <span className="font-medium text-white">Lumos Architecture</span>
                         <span className="text-zinc-400">Electron 34 · React 19 · Tuya LAN</span>
                       </div>
                       <div className="h-11 px-4 flex items-center justify-between text-xs">
