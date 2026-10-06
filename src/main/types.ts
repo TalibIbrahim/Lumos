@@ -155,6 +155,11 @@ export interface DeviceMetadata {
   }
 }
 
+export interface AppSettings {
+  launchAtLogin?: boolean
+  startInTray?: boolean
+}
+
 export interface LumosStoreData {
   rooms: RoomGroup[]
   presets: Preset[]
@@ -162,6 +167,7 @@ export interface LumosStoreData {
   sleepTimer: SleepTimerState | null
   sunriseAlarm: SunriseAlarm | null
   deviceMeta: Record<string, DeviceMetadata>
+  settings?: AppSettings
 }
 
 export type LumenStoreData = LumosStoreData

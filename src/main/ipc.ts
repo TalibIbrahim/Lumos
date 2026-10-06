@@ -280,6 +280,10 @@ export function setupIPC(
   // Launch at login Handlers
   ipcMain.handle('get-launch-at-login', () => {
     try {
+      const stored = lumosStore.getLaunchAtLogin()
+      if (typeof stored === 'boolean') {
+        return stored
+      }
       return app.getLoginItemSettings().openAtLogin
     } catch {
       return false
@@ -290,16 +294,15 @@ export function setupIPC(
     if (typeof openAtLogin !== 'boolean') return false
     try {
       app.setLoginItemSettings({
-        openAtLogin,
+        openAtLogin: Boolean(openAtLogin),
         openAsHidden: true,
-        path: process.execPath,
         args: ['--hidden']
       })
-      return app.getLoginItemSettings().openAtLogin
     } catch (err) {
       console.error('[Lumos IPC] Failed to set login item settings:', err)
-      return false
     }
+    lumosStore.setLaunchAtLogin(openAtLogin)
+    return openAtLogin
   })
 
   // Window control helpers for frameless title bar

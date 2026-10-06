@@ -97,7 +97,8 @@ export class LumosStore {
           schedules: Array.isArray(parsed.schedules) ? parsed.schedules : [],
           sleepTimer: parsed.sleepTimer || null,
           sunriseAlarm: parsed.sunriseAlarm || null,
-          deviceMeta: parsed.deviceMeta || {}
+          deviceMeta: parsed.deviceMeta || {},
+          settings: parsed.settings || {}
         }
       } catch (err) {
         console.error('[Lumos Store] Error reading store from disk:', err)
@@ -112,7 +113,8 @@ export class LumosStore {
       schedules: [],
       sleepTimer: null,
       sunriseAlarm: null,
-      deviceMeta: {}
+      deviceMeta: {},
+      settings: {}
     }
   }
 
@@ -129,6 +131,30 @@ export class LumosStore {
 
   public getData(): LumosStoreData {
     return this.data
+  }
+
+  public getLaunchAtLogin(): boolean | undefined {
+    return this.data.settings?.launchAtLogin
+  }
+
+  public setLaunchAtLogin(enabled: boolean): void {
+    if (!this.data.settings) {
+      this.data.settings = {}
+    }
+    this.data.settings.launchAtLogin = enabled
+    this.save()
+  }
+
+  public getStartInTray(): boolean {
+    return this.data.settings?.startInTray !== false
+  }
+
+  public setStartInTray(enabled: boolean): void {
+    if (!this.data.settings) {
+      this.data.settings = {}
+    }
+    this.data.settings.startInTray = enabled
+    this.save()
   }
 
   public applyMetadataToLights(): void {

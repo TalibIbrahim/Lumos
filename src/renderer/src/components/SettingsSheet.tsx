@@ -146,11 +146,13 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, o
     const api = window.lumos || window.lumen
     if (!api) return
     const nextVal = !launchAtLogin
+    setLaunchAtLogin(nextVal)
     try {
       const result = await api.setLaunchAtLogin(nextVal)
-      setLaunchAtLogin(result)
+      setLaunchAtLogin(Boolean(result))
     } catch (err) {
       console.error('[SettingsSheet] Error updating launch setting:', err)
+      setLaunchAtLogin(!nextVal)
     }
   }
 
