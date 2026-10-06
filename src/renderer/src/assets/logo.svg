@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" fill="none">
+  <defs>
+    <!-- Core thermodynamic radiation gradient -->
+    <radialGradient id="lumosCoreGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fffef2" />
+      <stop offset="25%" stop-color="#fde047" />
+      <stop offset="60%" stop-color="#f59e0b" />
+      <stop offset="90%" stop-color="#d97706" />
+      <stop offset="100%" stop-color="#b45309" />
+    </radialGradient>
+
+    <!-- Aperture emission flare into upper-right quadrant -->
+    <radialGradient id="lumosApertureFlare" cx="50%" cy="50%" r="50%" fx="65%" fy="35%">
+      <stop offset="0%" stop-color="#fde047" stop-opacity="0.4" />
+      <stop offset="50%" stop-color="#f59e0b" stop-opacity="0.15" />
+      <stop offset="100%" stop-color="#d97706" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Collimator rim specular reflection gradient -->
+    <linearGradient id="lumosRimGrad" x1="20%" y1="80%" x2="80%" y2="20%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.15" />
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0.3" />
+      <stop offset="75%" stop-color="#fed7aa" stop-opacity="0.7" />
+      <stop offset="100%" stop-color="#fde047" stop-opacity="0.95" />
+    </linearGradient>
+
+    <!-- Diffuse optical glow filter -->
+    <filter id="lumosGlowFilter" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Ambient emission aura -->
+  <circle cx="16" cy="16" r="10" fill="url(#lumosApertureFlare)" />
+
+  <!-- Directional aperture emission beam -->
+  <path d="M 16 16 L 27.5 13.5 A 13 13 0 0 0 18.5 4.5 Z" fill="url(#lumosApertureFlare)" opacity="0.75" />
+
+  <!-- Outer Collimator Arc (270-degree aperture rim) -->
+  <path
+    d="M 16 4 A 12 12 0 1 0 28 16"
+    stroke="url(#lumosRimGrad)"
+    stroke-width="2.5"
+    stroke-linecap="round"
+  />
+
+  <!-- Specular inner rim reflection -->
+  <path
+    d="M 16 6.5 A 9.5 9.5 0 1 0 25.5 16"
+    stroke="#ffffff"
+    stroke-opacity="0.15"
+    stroke-width="0.75"
+    stroke-linecap="round"
+  />
+
+  <!-- Radiant Emitter Core -->
+  <g filter="url(#lumosGlowFilter)">
+    <circle cx="16" cy="16" r="4.5" fill="url(#lumosCoreGlow)" />
+  </g>
+
+  <!-- Specular highlight glint on core -->
+  <circle cx="14.8" cy="14.8" r="1.3" fill="#ffffff" fill-opacity="0.8" />
+</svg>

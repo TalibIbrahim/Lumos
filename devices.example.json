@@ -1,0 +1,48 @@
+[
+  {
+    "name": "Sample Desk Lamp",
+    "id": "bf0123456789abcdef0123",
+    "key": "0123456789abcdef",
+    "mac": "00:11:22:33:44:55",
+    "category": "dj",
+    "product_name": "Smart Light",
+    "sub": false,
+    "ip": "192.168.1.100",
+    "version": "3.3",
+    "mapping": {
+      "20": {
+        "code": "switch_led",
+        "type": "Boolean",
+        "values": {}
+      },
+      "21": {
+        "code": "work_mode",
+        "type": "Enum",
+        "values": {
+          "range": [
+            "white",
+            "colour",
+            "scene",
+            "music"
+          ]
+        }
+      },
+      "22": {
+        "code": "bright_value_v2",
+        "type": "Integer",
+        "values": {
+          "min": 10,
+          "max": 1000
+        }
+      },
+      "23": {
+        "code": "temp_value_v2",
+        "type": "Integer",
+        "values": {
+          "min": 0,
+          "max": 1000
+        }
+      }
+    }
+  }
+]

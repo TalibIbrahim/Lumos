@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 148 32" width="148" height="32" fill="none">
+  <defs>
+    <radialGradient id="lockupCoreGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fffef2" />
+      <stop offset="30%" stop-color="#fde047" />
+      <stop offset="65%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </radialGradient>
+
+    <radialGradient id="lockupApertureFlare" cx="50%" cy="50%" r="50%" fx="65%" fy="35%">
+      <stop offset="0%" stop-color="#fde047" stop-opacity="0.4" />
+      <stop offset="50%" stop-color="#f59e0b" stop-opacity="0.15" />
+      <stop offset="100%" stop-color="#d97706" stop-opacity="0" />
+    </radialGradient>
+
+    <linearGradient id="lockupRimGrad" x1="20%" y1="80%" x2="80%" y2="20%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.2" />
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.35" />
+      <stop offset="80%" stop-color="#fed7aa" stop-opacity="0.75" />
+      <stop offset="100%" stop-color="#fde047" stop-opacity="0.95" />
+    </linearGradient>
+
+    <filter id="lockupGlowFilter" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="1.5" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Left: 32x32 Lumos Mark -->
+  <g transform="translate(0, 0)">
+    <!-- Ambient emission aura -->
+    <circle cx="16" cy="16" r="9" fill="url(#lockupApertureFlare)" />
+
+    <!-- Directional emission beam -->
+    <path d="M 16 16 L 27.5 13.5 A 13 13 0 0 0 18.5 4.5 Z" fill="url(#lockupApertureFlare)" opacity="0.75" />
+
+    <!-- Outer Collimator Arc -->
+    <path
+      d="M 16 4 A 12 12 0 1 0 28 16"
+      stroke="url(#lockupRimGrad)"
+      stroke-width="2.5"
+      stroke-linecap="round"
+    />
+
+    <!-- Specular inner rim reflection -->
+    <path
+      d="M 16 6.5 A 9.5 9.5 0 1 0 25.5 16"
+      stroke="#ffffff"
+      stroke-opacity="0.15"
+      stroke-width="0.75"
+      stroke-linecap="round"
+    />
+
+    <!-- Radiant Emitter Core -->
+    <g filter="url(#lockupGlowFilter)">
+      <circle cx="16" cy="16" r="4.5" fill="url(#lockupCoreGlow)" />
+    </g>
+
+    <!-- Specular highlight glint -->
+    <circle cx="14.8" cy="14.8" r="1.3" fill="#ffffff" fill-opacity="0.85" />
+  </g>
+
+  <!-- Right: Wordmark "Lumos" in Outfit Geometric Typography -->
+  <text
+    x="44"
+    y="22.5"
+    fill="#ffffff"
+    font-family="'Outfit', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif"
+    font-size="18"
+    font-weight="600"
+    letter-spacing="-0.02em"
+  >Lumos</text>
+
+  <!-- Subtle Architecture / Edition Pill Kicker -->
+  <rect x="104" y="10" width="36" height="13" rx="4" fill="#ffffff" fill-opacity="0.08" stroke="#ffffff" stroke-opacity="0.1" stroke-width="0.75" />
+  <text
+    x="122"
+    y="19.5"
+    fill="#a1a1aa"
+    text-anchor="middle"
+    font-family="'SF Mono', 'Segoe UI Mono', monospace"
+    font-size="8"
+    font-weight="500"
+    letter-spacing="0.08em"
+  >CORE</text>
+</svg>

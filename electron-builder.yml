@@ -1,0 +1,27 @@
+appId: com.lumos.app
+productName: Lumos
+artifactName: "Lumos-Setup-${version}.${ext}"
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**/*
+  - build/**/*
+  - package.json
+win:
+  icon: build/icon.ico
+  signAndEditExecutable: false
+  target:
+    - target: nsis
+      arch:
+        - x64
+mac:
+  icon: build/icon.icns
+  category: public.app-category.lifestyle
+linux:
+  icon: build/icon.png
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+

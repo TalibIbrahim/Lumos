@@ -1,0 +1,62 @@
+{
+  "name": "lumos",
+  "version": "1.0.0",
+  "description": "Local-first desktop app for Tuya smart lights with Apple HomeKit",
+  "main": "./out/main/index.js",
+  "author": "TalibIbrahim",
+  "license": "MIT",
+  "homepage": "https://github.com/TalibIbrahim/Lumos",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TalibIbrahim/Lumos.git"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "lint": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "test": "vitest run",
+    "start": "electron-vite preview",
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "build:unpack": "npm run build && electron-builder --dir",
+    "build:win": "npm run build && electron-builder --win",
+    "build:mac": "npm run build && electron-builder --mac",
+    "build:linux": "npm run build && electron-builder --linux"
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.1",
+    "@electron-toolkit/utils": "^3.0.0",
+    "@fontsource/outfit": "^5.3.0",
+    "@stablelib/chacha20poly1305": "^2.0.1",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.4.7",
+    "hap-nodejs": "^0.14.3",
+    "lucide-react": "^0.475.0",
+    "ogl": "^1.0.11",
+    "qrcode": "^1.5.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^3.0.1",
+    "tuyapi": "^7.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.6",
+    "@types/node": "^22.13.4",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^3.0.0",
+    "png-to-ico": "^3.0.2",
+    "png2icons": "^2.0.1",
+    "sharp": "^0.35.5",
+    "tailwindcss": "^4.0.6",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0",
+    "vitest": "^5.0.3"
+  }
+}
