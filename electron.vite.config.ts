@@ -19,7 +19,9 @@ export default defineConfig({
         input: {
           index: resolve('src/preload/index.ts'),
           // Bridge for the hidden audio analysis page
-          audio: resolve('src/preload/audio.ts')
+          audio: resolve('src/preload/audio.ts'),
+          // Bridge for the hidden Screen Sync capture page
+          screen: resolve('src/preload/screen.ts')
         }
       }
     }
@@ -37,7 +39,9 @@ export default defineConfig({
         input: {
           index: resolve('src/renderer/index.html'),
           // Hidden page that analyzes system audio for the Music effect
-          audio: resolve('src/renderer/audio.html')
+          audio: resolve('src/renderer/audio.html'),
+          // Hidden page that analyses the screen for Screen Sync
+          screen: resolve('src/renderer/screen.html')
         }
       }
     }

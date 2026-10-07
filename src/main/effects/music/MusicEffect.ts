@@ -5,9 +5,25 @@ import { MAX_FLASHES_PER_SECOND } from '../safety'
 import { asObj, bool, hueSat, HueSat, int, oneOf, targets } from '../validate'
 import type { MusicFeatures } from '../../../shared/audio/analysis'
 import type { MusicSource } from './capture'
-import { PALETTES, PaletteName, driftRate, paletteColor, pulseBrightness, pulseEnvelope } from './mapping'
+import {
+  DROP_BURST_MS,
+  DROP_SECTION_MS,
+  PALETTES,
+  PaletteName,
+  driftRate,
+  paletteColor,
+  partyBrightness,
+  partyColor,
+  partyEnvelope,
+  pulseBrightness,
+  pulseEnvelope
+} from './mapping'
+
+/** Smooth drifts and pulses gently; party snaps to the beat and goes full bright on drops. */
+export type MusicStyle = 'smooth' | 'party'
 
 export interface MusicSettings extends EffectSettingsBase {
+  style: MusicStyle
   /** 0..100, how easily beats are detected. */
   sensitivity: number
   palette: PaletteName
@@ -44,6 +60,8 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
   private features: MusicFeatures | null = null
   private lastBeatAt = -Infinity
   private beatStrength = 0
+  private beatCount = 0
+  private lastDropAt = -Infinity
   private position = 0
   private lastAdvance = 0
   private silentSince: number | null = null
@@ -65,6 +83,7 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
     return {
       enabled: false,
       targets: 'all',
+      style: 'smooth',
       sensitivity: 60,
       palette: 'aurora',
       customColors: [
@@ -89,6 +108,7 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
     return {
       enabled: bool(o.enabled, false),
       targets: targets(o.targets),
+      style: oneOf(o.style, ['smooth', 'party'] as const, d.style),
       sensitivity: int(o.sensitivity, d.sensitivity, 0, 100),
       palette: oneOf(o.palette, ['aurora', 'sunset', 'ocean', 'neon', 'custom'] as const, d.palette),
       customColors: custom.length >= 2 ? custom : d.customColors,
@@ -110,6 +130,8 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
     this.features = null
     this.silentSince = null
     this.position = Math.random()
+    this.beatCount = 0
+    this.lastDropAt = -Infinity
     this.lastAdvance = this.clock()
     const source = this.createSource(this.host.isDemo())
     this.source = source
@@ -148,7 +170,9 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
     if (f.beat) {
       this.lastBeatAt = now
       this.beatStrength = Math.max(0.35, f.beatStrength)
+      this.beatCount++
     }
+    if (f.drop) this.lastDropAt = now
 
     if (f.silent) {
       if (this.silentSince === null) this.silentSince = now
@@ -170,14 +194,14 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
 
     if (now < this.meterUntil && now - this.lastMeterAt >= METER_INTERVAL_MS) {
       this.lastMeterAt = now
-      this.emitLive({ loudness: f.loudness, low: f.low, beat: f.beat, tempo: f.tempo, silent: f.silent })
+      this.emitLive({ loudness: f.loudness, low: f.low, beat: f.beat, drop: f.drop, tempo: f.tempo, silent: f.silent })
     }
   }
 
   // --- Layer ---
 
   appliesTo(lightId: string): boolean {
-    return !this.quiet && this.isTarget(lightId)
+    return !this.quiet && this.isTarget(lightId) && !this.host.claimedByOther(this.id, lightId)
   }
 
   isAnimating(): boolean {
@@ -188,6 +212,7 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
     if (this.quiet || !this.features || !below.power) return null
     const now = ctx.now
     this.advance(now)
+    if (this.settings.style === 'party') return this.composeParty(below, ctx)
 
     const depth = (this.settings.pulseDepth / 100) * (ctx.reduceIntensity ? 0.5 : 1)
     const pulse = pulseEnvelope(now - this.lastBeatAt, this.beatStrength, this.features.tempo)
@@ -206,6 +231,28 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
     return { ...asAdjustable(below), power: true, mode: 'colour', h: colour.h, s: colour.s, brightness }
   }
 
+  private composeParty(below: LightOutput, ctx: ComposeContext): LightOutput {
+    const now = ctx.now
+    const features = this.features!
+    const sinceDrop = now - this.lastDropAt
+    // The drop itself: every light at full white for a moment (skipped when intensity is reduced)
+    if (sinceDrop >= 0 && sinceDrop < DROP_BURST_MS && !ctx.reduceIntensity) {
+      return { ...asAdjustable(below), power: true, mode: 'white', brightness: 100, colorTemp: 100, scene: undefined }
+    }
+    const afterDrop = sinceDrop >= 0 && sinceDrop < DROP_SECTION_MS
+    const depth = (this.settings.pulseDepth / 100) * (ctx.reduceIntensity ? 0.5 : 1)
+    const pulse = partyEnvelope(now - this.lastBeatAt, this.beatStrength, features.tempo, afterDrop)
+    // Party mode always swings to full, so the depth sets how dark it gets between beats
+    const brightness = partyBrightness(luminance(below) || 100, pulse, features.low, 0.5 + depth * 0.5)
+
+    const fromAlbum = below.mode === 'colour' && !outputsEqual(below, ctx.base)
+    const palette = this.settings.palette === 'custom' ? this.settings.customColors : PALETTES[this.settings.palette]
+    const colour = fromAlbum
+      ? { h: below.h, s: below.s }
+      : partyColor(palette, this.beatCount, ctx.count > 1 ? ctx.index : 0, this.settings.wave)
+    return { ...asAdjustable(below), power: true, mode: 'colour', h: colour.h, s: colour.s, brightness }
+  }
+
   private advance(now: number): void {
     if (now <= this.lastAdvance) return
     const dt = (now - this.lastAdvance) / 1000
@@ -214,7 +261,11 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
   }
 
   protected info(): Record<string, unknown> {
-    return { tempo: this.features?.tempo ?? null, playing: !this.quiet }
+    return {
+      tempo: this.features?.tempo ?? null,
+      playing: !this.quiet,
+      lastDropAt: Number.isFinite(this.lastDropAt) ? this.lastDropAt : null
+    }
   }
 
   public async handleAction(action: string, payload: unknown): Promise<unknown> {

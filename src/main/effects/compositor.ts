@@ -2,7 +2,7 @@ import { EventEmitter } from 'events'
 import type { Light } from '../devices/Light'
 import type { DeviceCapabilities } from '../types'
 import { FlashGuard } from './safety'
-import { LightOutput, blendOutput, easeInOutCubic, outputsEqual, quantize } from './output'
+import { LightOutput, blendOutput, blendViaDark, easeInOutCubic, outputsEqual, quantize } from './output'
 
 /**
  * Layer priorities. Lower numbers win: they are applied last, on top of
@@ -12,8 +12,10 @@ import { LightOutput, blendOutput, easeInOutCubic, outputsEqual, quantize } from
 export enum LayerPriority {
   Idle = 1,
   GameOverlay = 2,
-  Music = 3,
-  NowPlaying = 4
+  /** Screen Sync drives its lights alone: Music and Album color step aside on them. */
+  ScreenSync = 3,
+  Music = 4,
+  NowPlaying = 5
 }
 
 export interface ComposeContext {
@@ -56,6 +58,8 @@ interface Fade {
   from: LightOutput
   start: number
   duration: number
+  /** A change between white and colour dips through darkness instead of switching at full brightness. */
+  viaDark?: boolean
 }
 
 interface Channel {
@@ -175,12 +179,12 @@ export class Compositor extends EventEmitter {
     this.invalidate(this.lightsFor(layer), fadeMs)
   }
 
-  public removeLayer(id: string, fadeMs = 0): void {
+  public removeLayer(id: string, fadeMs = 0, viaDark = false): void {
     const layer = this.layers.find((l) => l.id === id)
     if (!layer) return
     const affected = this.lightsFor(layer)
     this.layers = this.layers.filter((l) => l.id !== id)
-    this.invalidate(affected, fadeMs)
+    this.invalidate(affected, fadeMs, viaDark)
   }
 
   public hasLayer(id: string): boolean {
@@ -191,7 +195,7 @@ export class Compositor extends EventEmitter {
    * Recomposes the given lights (all when omitted). With a fade, the change is
    * eased from whatever the lights currently show.
    */
-  public invalidate(lightIds?: string[], fadeMs = 0): void {
+  public invalidate(lightIds?: string[], fadeMs = 0, viaDark = false): void {
     if (this.destroyed) return
     const now = this.clock()
     const ids = lightIds ?? Array.from(this.channels.keys())
@@ -199,7 +203,7 @@ export class Compositor extends EventEmitter {
       const ch = this.channels.get(id)
       if (!ch) continue
       if (fadeMs > 0 && ch.lastComposed) {
-        ch.fade = { from: ch.lastComposed, start: now, duration: fadeMs }
+        ch.fade = { from: ch.lastComposed, start: now, duration: fadeMs, viaDark }
       }
       this.render(ch, now)
     }
@@ -271,7 +275,7 @@ export class Compositor extends EventEmitter {
       if (t >= 1) {
         ch.fade = null
       } else {
-        output = blendOutput(ch.fade.from, target, easeInOutCubic(t))
+        output = (ch.fade.viaDark ? blendViaDark : blendOutput)(ch.fade.from, target, easeInOutCubic(t))
       }
     }
 
@@ -323,14 +327,24 @@ export class Compositor extends EventEmitter {
 
   private refill(ch: Channel, now: number): void {
     const elapsed = Math.max(0, now - ch.lastRefill)
-    ch.tokens = Math.min(BURST, ch.tokens + (elapsed * this.ratePerSecond) / 1000)
+    ch.tokens = Math.min(BURST, ch.tokens + (elapsed * this.rateFor(ch.light)) / 1000)
     ch.lastRefill = now
+  }
+
+  /**
+   * Commands per second for one light: the configured budget, lowered when
+   * the bulb is slow to answer so commands never pile up behind it.
+   */
+  public rateFor(light: Light): number {
+    const ack = light.ackLatencyMs
+    if (!ack) return this.ratePerSecond
+    return Math.max(2, Math.min(this.ratePerSecond, 1000 / (ack * 1.25)))
   }
 
   private scheduleWake(ch: Channel): void {
     if (ch.wakeTimer || this.destroyed) return
     const needed = Math.max(0, 1 - ch.tokens)
-    const delay = Math.max(1, Math.ceil((needed * 1000) / this.ratePerSecond))
+    const delay = Math.max(1, Math.ceil((needed * 1000) / this.rateFor(ch.light)))
     ch.wakeTimer = setTimeout(() => {
       ch.wakeTimer = null
       // Latest wins: recompose now rather than sending the frame that was dropped.

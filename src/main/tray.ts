@@ -8,6 +8,17 @@ let tray: Tray | null = null
 let rebuildMenu: (() => void) | null = null
 let pendingUpdate: { version: string; install: () => void } | null = null
 
+let effectToggles: Array<{ label: string; checked: boolean; toggle: () => void }> = []
+
+/** On and off switches for effects in the tray menu. */
+export function setTrayEffects(items: Array<{ label: string; checked: boolean; toggle: () => void }>): void {
+  const same =
+    items.length === effectToggles.length &&
+    items.every((it, i) => it.label === effectToggles[i].label && it.checked === effectToggles[i].checked)
+  effectToggles = items
+  if (!same) rebuildMenu?.()
+}
+
 /** Shows a "Restart to update" item in the tray menu once an update is downloaded. */
 export function setTrayUpdateReady(version: string, install: () => void): void {
   pendingUpdate = { version, install }
@@ -82,6 +93,13 @@ export function createTray(mainWindow: BrowserWindow, lightManager: LightManager
         }
       },
       { type: 'separator' },
+      ...effectToggles.map((it) => ({
+        label: it.label,
+        type: 'checkbox' as const,
+        checked: it.checked,
+        click: (): void => it.toggle()
+      })),
+      ...(effectToggles.length ? [{ type: 'separator' as const }] : []),
       {
         label: 'All On',
         click: (): void => {

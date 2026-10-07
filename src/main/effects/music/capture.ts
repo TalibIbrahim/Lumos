@@ -119,6 +119,7 @@ export class SimulatedMusicSource extends EventEmitter implements MusicSource {
   private timer: NodeJS.Timeout | null = null
   private t0 = 0
   private lastBeat = 0
+  private dropped = true
 
   public start(): void {
     if (this.timer) return
@@ -128,17 +129,25 @@ export class SimulatedMusicSource extends EventEmitter implements MusicSource {
     this.timer = setInterval(() => {
       const now = Date.now()
       const elapsed = (now - this.t0) / 1000
-      const beat = now - this.lastBeat >= 500
-      if (beat) this.lastBeat = now
+      // Every 30 seconds: a four second breakdown without kicks, then a drop
+      const cycle = elapsed % 30
+      const breakdown = elapsed > 30 && cycle < 4
+      const due = now - this.lastBeat >= 500
+      const beat = due && !breakdown
+      if (due) this.lastBeat = now
+      const drop = beat && elapsed > 30 && !this.dropped && cycle >= 4
+      if (drop) this.dropped = true
+      if (breakdown) this.dropped = false
       const swell = 0.55 + 0.25 * Math.sin(elapsed / 6)
       this.emit('features', {
-        loudness: swell,
-        low: beat ? 0.9 : Math.max(0, 0.9 - ((now - this.lastBeat) / 500) * 0.8),
+        loudness: breakdown ? 0.35 : swell,
+        low: breakdown ? 0.05 : beat ? 0.9 : Math.max(0, 0.9 - ((now - this.lastBeat) / 500) * 0.8),
         beat,
-        beatStrength: beat ? 0.8 : 0,
+        beatStrength: beat ? (drop ? 1 : 0.8) : 0,
         tempo: elapsed > 3 ? 120 : null,
         energy: 0.6,
-        silent: false
+        silent: false,
+        drop
       } satisfies MusicFeatures)
     }, 33)
   }

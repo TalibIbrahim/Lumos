@@ -511,6 +511,18 @@ describe('Light: base state commands keep their original shape', () => {
     expect(lights[0].mode).toBe('colour')
   })
 
+  it('turning back on after an off frame restates the mode, so a bulb left in colour returns to white', async () => {
+    const { lights, log } = createMockLights(1)
+    const colour = { power: true, mode: 'colour' as const, brightness: 40, colorTemp: 50, h: 30, s: 40 }
+    await lights[0].sendOutput(colour)
+    // An off frame that still names the white mode, as the base state would
+    await lights[0].sendOutput({ power: false, mode: 'white', brightness: 40, colorTemp: 50, h: 30, s: 40 })
+    log.length = 0
+    await lights[0].sendOutput({ power: true, mode: 'white', brightness: 40, colorTemp: 50, h: 30, s: 40 })
+    expect(log[0].data['21']).toBe('white')
+    expect(log[0].data['20']).toBe(true)
+  })
+
   it('colour output on a white-only bulb becomes white at the same level', async () => {
     const { lights, log } = createMockLights(1, { colour: false })
     await lights[0].sendOutput({ power: true, mode: 'colour', brightness: 60, colorTemp: 50, h: 0, s: 100 })

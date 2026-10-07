@@ -40,7 +40,7 @@ export interface SidebarProps {
  * - Bottom Pinned: Settings
  * - Responsive collapse behavior below 880px with accessible overlay scrim
  */
-export const Sidebar: React.FC<SidebarProps> = ({
+const SidebarComponent: React.FC<SidebarProps> = ({
   currentView,
   rooms,
   lights,
@@ -400,5 +400,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
     </motion.aside>
   )
 }
+
+/** Which lights are on and where: all the sidebar shows about lights. */
+const activeSignature = (lights: NormalizedLightState[]): string =>
+  lights
+    .filter((l) => !l.hidden && l.online && l.power)
+    .map((l) => `${l.id}:${l.room ?? ''}`)
+    .join('|')
+
+// Light updates arrive many times a second during a drag; the sidebar only redraws when its counts can change
+export const Sidebar = React.memo(SidebarComponent, (prev, next) => {
+  for (const key of Object.keys(next) as Array<keyof SidebarProps>) {
+    if (key === 'lights') continue
+    if (prev[key] !== next[key]) return false
+  }
+  return prev.lights === next.lights || activeSignature(prev.lights) === activeSignature(next.lights)
+})
 
 export default Sidebar

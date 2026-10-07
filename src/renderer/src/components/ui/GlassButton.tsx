@@ -70,8 +70,8 @@ export const GlassButton: React.FC<GlassButtonProps> = ({
     : variant === 'destructive'
     ? 'text-rose-300 hover:text-rose-100'
     : variant === 'subtle'
-    ? 'text-zinc-400 hover:text-zinc-100'
-    : 'text-zinc-300 hover:text-white'
+    ? 'text-zinc-200 hover:text-white'
+    : 'text-zinc-100 hover:text-white'
 
   return (
     <motion.button

@@ -126,6 +126,24 @@ export function outputsEqual(a: LightOutput | null, b: LightOutput | null): bool
  * White and colour are blended through an approximate colour for the white end.
  * Scene and music modes cannot be blended and switch at the end of the fade.
  */
+/**
+ * Like blendOutput, but a change between white and colour goes through darkness: the first light dims to
+ * almost nothing, then the new mode brightens from almost nothing. A bulb's white mode is far brighter than
+ * its colour mode at the same percentage, so a straight switch at full brightness would flash.
+ */
+export function blendViaDark(a: LightOutput, b: LightOutput, t: number): LightOutput {
+  const x = clamp(t, 0, 1)
+  if (x >= 1) return b
+  if (x <= 0) return a
+  const from = asAdjustable(a)
+  // Coming up from off: start from almost nothing in the target's own mode and rise from there
+  if (!a.power && b.power && isAdjustable(b)) return { ...b, power: true, brightness: Math.max(1, Math.round(lerp(1, b.brightness, x))) }
+  if (!a.power || !b.power || !isAdjustable(b) || from.mode === b.mode) return blendOutput(a, b, x)
+  const first = x < 0.5
+  const brightness = first ? lerp(from.brightness, 1, x * 2) : lerp(1, b.brightness, (x - 0.5) * 2)
+  return { ...(first ? from : b), brightness: Math.max(1, Math.round(brightness)) }
+}
+
 export function blendOutput(a: LightOutput, b: LightOutput, t: number): LightOutput {
   const x = clamp(t, 0, 1)
   if (x >= 1) return b

@@ -40,7 +40,7 @@ export interface ToolbarProps {
  * - Middle: Electron draggable window region (-webkit-app-region: drag)
  * - Right: Action Glass Surface buttons (Add/Edit, Power toggle, Overflow menu)
  */
-export const Toolbar: React.FC<ToolbarProps> = ({
+const ToolbarComponent: React.FC<ToolbarProps> = ({
   title,
   subtitle,
   isSidebarCollapsed,
@@ -226,5 +226,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     </header>
   )
 }
+
+export const Toolbar = React.memo(ToolbarComponent)
 
 export default Toolbar

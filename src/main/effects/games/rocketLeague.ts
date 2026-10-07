@@ -22,6 +22,14 @@ export interface RlPlayerRef {
   teamNum: number
 }
 
+export interface RlPlayer extends RlPlayerRef {
+  /**
+   * The API includes live car details (boost, speed and so on) only for
+   * players on your own team, or for everyone when you spectate.
+   */
+  detailed: boolean
+}
+
 export interface RlTeam {
   teamNum: number
   name: string
@@ -29,7 +37,7 @@ export interface RlTeam {
 }
 
 export type RlEvent =
-  | { type: 'state'; players: RlPlayerRef[]; teams: RlTeam[]; replay: boolean }
+  | { type: 'state'; players: RlPlayer[]; teams: RlTeam[]; replay: boolean; target: RlPlayerRef | null }
   | { type: 'goal'; scorer: RlPlayerRef | null }
   | { type: 'matchEnded'; winnerTeamNum: number | null }
   | { type: 'matchStart' }
@@ -41,6 +49,15 @@ function playerRef(v: unknown): RlPlayerRef | null {
   const teamNum = num(v.TeamNum, -1, -1, 255)
   if (teamNum < 0) return null
   return { name: str(v.Name, '', 64), teamNum: Math.round(teamNum) }
+}
+
+/** Fields the API sends only for your own team (or for everyone while spectating). */
+const DETAIL_FIELDS = ['Boost', 'Speed', 'bHasCar', 'bBoosting', 'bOnGround']
+
+function player(v: unknown): RlPlayer | null {
+  const ref = playerRef(v)
+  if (!ref || !isObj(v)) return null
+  return { ...ref, detailed: DETAIL_FIELDS.some((k) => k in v) }
 }
 
 /** Parses one Stats API message. Returns null for anything malformed. */
@@ -67,9 +84,12 @@ export function parseRlMessage(raw: string): RlEvent | null {
   switch (msg.Event) {
     case 'UpdateState': {
       const players = Array.isArray(d.Players)
-        ? d.Players.slice(0, 16).map(playerRef).filter((p): p is RlPlayerRef => p !== null)
+        ? d.Players.slice(0, 16).map(player).filter((p): p is RlPlayer => p !== null)
         : []
       const game = asObj(d.Game)
+      const targetRef = game.bHasTarget === true ? playerRef(game.Target) : null
+      // An empty name means the camera is not following anyone
+      const target = targetRef && targetRef.name ? targetRef : null
       const teams: RlTeam[] = Array.isArray(game.Teams)
         ? game.Teams.slice(0, 4)
             .filter(isObj)
@@ -80,7 +100,7 @@ export function parseRlMessage(raw: string): RlEvent | null {
             }))
             .filter((t) => t.teamNum >= 0)
         : []
-      return { type: 'state', players, teams, replay: game.bReplay === true }
+      return { type: 'state', players, teams, replay: game.bReplay === true, target }
     }
     case 'GoalScored':
       return { type: 'goal', scorer: playerRef(d.Scorer) }
@@ -99,9 +119,35 @@ export function parseRlMessage(raw: string): RlEvent | null {
 
 export type GoalOutcome = 'ours' | 'theirs' | 'unknown'
 
-/** Remembers which team the user is on and the team colours for the current match. */
+/** How the user's team was worked out, shown in the settings. */
+export type TeamSource = 'name' | 'team-data' | 'camera' | null
+
+/** Lower case with clan tags, brackets, symbols, and spaces removed, for forgiving name matching. */
+export function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\[[^\]]*\]|\([^)]*\)|\{[^}]*\}|<[^>]*>/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
+function nameMatches(playerName: string, wanted: string): boolean {
+  const a = normalizeName(playerName)
+  const b = normalizeName(wanted)
+  if (!a || !b) return false
+  // A clan tag written without brackets ("TAG Name") still matches "Name"
+  return a === b || (b.length >= 3 && (a.endsWith(b) || a.startsWith(b))) || (a.length >= 3 && (b.endsWith(a) || b.startsWith(a)))
+}
+
+/**
+ * Remembers which team the user is on and the team colours for the current
+ * match. The team is found, in order of preference, from:
+ *  1. the in-game name, if the user gave one and it matches a player;
+ *  2. the API's live car details, which it sends only for your own team;
+ *  3. the player the camera follows, which is you while you play.
+ */
 export class RlMatchTracker {
   private myTeam: number | null = null
+  private source: TeamSource = null
   private teams: RlTeam[] = []
 
   constructor(private playerName: string) {}
@@ -109,24 +155,54 @@ export class RlMatchTracker {
   public setPlayerName(name: string): void {
     this.playerName = name
     this.myTeam = null
+    this.source = null
   }
 
   public update(event: RlEvent): void {
     if (event.type === 'state') {
       if (event.teams.length > 0) this.teams = event.teams
-      const wanted = this.playerName.trim().toLowerCase()
-      if (wanted) {
-        const me = event.players.find((p) => p.name.trim().toLowerCase() === wanted)
-        if (me && me.teamNum <= 1) this.myTeam = me.teamNum
+      const found = this.detect(event)
+      if (found) {
+        this.myTeam = found.team
+        this.source = found.source
       }
     } else if (event.type === 'matchDestroyed') {
       this.myTeam = null
+      this.source = null
       this.teams = []
     }
   }
 
+  private detect(e: Extract<RlEvent, { type: 'state' }>): { team: number; source: TeamSource } | null {
+    const wanted = this.playerName.trim()
+    if (wanted) {
+      const me = e.players.find((p) => nameMatches(p.name, wanted))
+      if (me && me.teamNum <= 1) return { team: me.teamNum, source: 'name' }
+    }
+    const detailedTeams = new Set(e.players.filter((p) => p.detailed && p.teamNum <= 1).map((p) => p.teamNum))
+    const otherTeamHasPlayers = e.players.some((p) => p.teamNum <= 1 && !detailedTeams.has(p.teamNum))
+    // Only one team has car details, and the other team is in the match: that is your team
+    if (detailedTeams.size === 1 && otherTeamHasPlayers) {
+      return { team: Array.from(detailedTeams)[0], source: 'team-data' }
+    }
+    // Replays move the camera to other players, so it only counts during play
+    if (!e.replay && e.target && e.target.teamNum <= 1 && this.source !== 'team-data' && this.source !== 'name') {
+      return { team: e.target.teamNum, source: 'camera' }
+    }
+    return null
+  }
+
+  public getSource(): TeamSource {
+    return this.source
+  }
+
   public getMyTeam(): number | null {
     return this.myTeam
+  }
+
+  public teamName(teamNum: number | null): string | null {
+    if (teamNum === null) return null
+    return this.teams.find((t) => t.teamNum === teamNum)?.name || (teamNum === 0 ? 'Blue' : teamNum === 1 ? 'Orange' : null)
   }
 
   public teamColor(teamNum: number | null): string | null {

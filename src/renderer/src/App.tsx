@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import {
   LightbulbOff,
@@ -11,7 +11,7 @@ import {
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { RoomSection } from './components/RoomSection'
-import { LightTile } from './components/LightTile'
+import { TileCell, tileLayoutKey } from './components/TileCell'
 import { PresetsBar } from './components/PresetsBar'
 import { LightDetailSheet } from './components/LightDetailSheet'
 import { AutomationsView } from './components/AutomationsView'
@@ -220,6 +220,10 @@ export const App: React.FC = () => {
     return undefined
   }, [fetchStatusAndStore])
 
+  // Read through a ref so this handler, and the toolbar that takes it, stay the same between light updates
+  const lightsRef = useRef(lights)
+  lightsRef.current = lights
+
   // Retries offline lights now, searching the network for any whose address changed
   const handleReconnectLights = useCallback(async () => {
     const api = window.lumos
@@ -227,14 +231,18 @@ export const App: React.FC = () => {
       await fetchStatusAndStore()
       return
     }
-    const offline = lights.filter((l) => !l.online && !l.hidden).length
+    const offline = lightsRef.current.filter((l) => !l.online && !l.hidden).length
     if (offline > 0) showToast(offline === 1 ? 'Looking for 1 light' : `Looking for ${offline} lights`)
     try {
       await api.reconnectLights()
     } finally {
       await fetchStatusAndStore()
     }
-  }, [fetchStatusAndStore, lights, showToast])
+  }, [fetchStatusAndStore, showToast])
+
+  const openSettings = useCallback(() => setIsSettingsOpen(true), [])
+  const openRooms = useCallback(() => setIsRoomsOpen(true), [])
+  const toggleSidebar = useCallback(() => setIsSidebarCollapsed((prev) => !prev), [])
 
   // Control from another computer: reload everything whenever the link to it comes up
   useEffect(() => {
@@ -435,6 +443,8 @@ export const App: React.FC = () => {
     []
   )
 
+  const handleOpenDetail = useCallback((l: NormalizedLightState) => setSelectedDetailLightId(l.id), [])
+
   const handleCloseContextMenu = useCallback(() => {
     setContextMenu((prev) => ({ ...prev, isOpen: false, light: null }))
   }, [])
@@ -501,6 +511,9 @@ export const App: React.FC = () => {
         l.room === currentRoom.id
     )
   }, [currentRoom, visibleLights])
+
+  const ungroupedLayoutKey = useMemo(() => tileLayoutKey(ungroupedLights), [ungroupedLights])
+  const currentRoomLayoutKey = useMemo(() => tileLayoutKey(currentRoomLights), [currentRoomLights])
 
   const currentRoomActive = useMemo(() => {
     return currentRoomLights.filter((l) => l.online && l.power).length > 0
@@ -735,14 +748,12 @@ export const App: React.FC = () => {
         sceneCount={scenes.length}
         activeAutomationCount={activeAutomationCount}
         activeEffectCount={activeEffectCount}
-        onSelectView={(viewId) => {
-          setCurrentView(viewId)
-        }}
-        onAddRoom={() => setIsRoomsOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onSelectView={setCurrentView}
+        onAddRoom={openRooms}
+        onOpenSettings={openSettings}
         isCollapsed={isSidebarCollapsed}
         isCompact={isCompact}
-        onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
+        onToggleCollapse={toggleSidebar}
       />
 
       {/* Main Workspace Pane */}
@@ -753,7 +764,7 @@ export const App: React.FC = () => {
           subtitle={toolbarConfig.subtitle}
           isSidebarCollapsed={isSidebarCollapsed}
           isCompact={isCompact}
-          onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
+          onToggleSidebar={toggleSidebar}
           primaryActionLabel={toolbarConfig.primaryActionLabel}
           primaryActionIcon={toolbarConfig.primaryActionIcon}
           onPrimaryAction={toolbarConfig.onPrimaryAction}
@@ -762,7 +773,7 @@ export const App: React.FC = () => {
           onTogglePower={toolbarConfig.onTogglePower}
           onScanSubnet={handleReconnectLights}
           onRefresh={handleReconnectLights}
-          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenSettings={openSettings}
         />
 
         {/* Scrollable View Canvas */}
@@ -870,7 +881,7 @@ export const App: React.FC = () => {
                         lights={visibleLights}
                         onToggleLight={handleToggle}
                         onBrightnessChange={handleBrightnessChange}
-                        onOpenDetail={(l) => setSelectedDetailLightId(l.id)}
+                        onOpenDetail={handleOpenDetail}
                         onToggleRoom={handleToggleRoom}
                         onContextMenu={handleOpenContextMenu}
                         focusedLightId={focusedLightId}
@@ -895,23 +906,17 @@ export const App: React.FC = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                           <AnimatePresence mode="popLayout">
                             {ungroupedLights.map((light) => (
-                              <motion.div
+                              <TileCell
                                 key={light.id}
-                                layout={!shouldReduceMotion}
-                                initial={shouldReduceMotion ? undefined : { opacity: 0, scale: 0.96 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={shouldReduceMotion ? undefined : { opacity: 0, scale: 0.94 }}
-                                transition={springs.default}
-                              >
-                                <LightTile
-                                  light={light}
-                                  onToggle={handleToggle}
-                                  onBrightnessChange={handleBrightnessChange}
-                                  onOpenDetail={(l) => setSelectedDetailLightId(l.id)}
-                                  onContextMenu={handleOpenContextMenu}
-                                  isFocused={focusedLightId === light.id}
-                                />
-                              </motion.div>
+                                light={light}
+                                onToggle={handleToggle}
+                                onBrightnessChange={handleBrightnessChange}
+                                onOpenDetail={handleOpenDetail}
+                                onContextMenu={handleOpenContextMenu}
+                                isFocused={focusedLightId === light.id}
+                                reduceMotion={Boolean(shouldReduceMotion)}
+                                layoutKey={ungroupedLayoutKey}
+                              />
                             ))}
                           </AnimatePresence>
                         </div>
@@ -942,23 +947,17 @@ export const App: React.FC = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                       <AnimatePresence mode="popLayout">
                         {currentRoomLights.map((light) => (
-                          <motion.div
+                          <TileCell
                             key={light.id}
-                            layout={!shouldReduceMotion}
-                            initial={shouldReduceMotion ? undefined : { opacity: 0, scale: 0.96 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={shouldReduceMotion ? undefined : { opacity: 0, scale: 0.94 }}
-                            transition={springs.default}
-                          >
-                            <LightTile
-                              light={light}
-                              onToggle={handleToggle}
-                              onBrightnessChange={handleBrightnessChange}
-                              onOpenDetail={(l) => setSelectedDetailLightId(l.id)}
-                              onContextMenu={handleOpenContextMenu}
-                              isFocused={focusedLightId === light.id}
-                            />
-                          </motion.div>
+                            light={light}
+                            onToggle={handleToggle}
+                            onBrightnessChange={handleBrightnessChange}
+                            onOpenDetail={handleOpenDetail}
+                            onContextMenu={handleOpenContextMenu}
+                            isFocused={focusedLightId === light.id}
+                            reduceMotion={Boolean(shouldReduceMotion)}
+                            layoutKey={currentRoomLayoutKey}
+                          />
                         ))}
                       </AnimatePresence>
                     </div>
@@ -1089,7 +1088,7 @@ export const App: React.FC = () => {
         rooms={rooms}
         onClose={handleCloseContextMenu}
         onTogglePower={handleToggle}
-        onOpenDetails={(l) => setSelectedDetailLightId(l.id)}
+        onOpenDetails={handleOpenDetail}
         onUpdateMetadata={handleUpdateMetadata}
       />
     </div>

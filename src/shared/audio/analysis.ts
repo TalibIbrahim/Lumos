@@ -5,7 +5,9 @@
  *
  * Per frame: Hann-windowed FFT, a low-band (kick and bass) energy envelope,
  * spectral flux with an adaptive threshold for beat onsets, a rough tempo
- * from recent beat intervals, and an overall loudness measure.
+ * from recent beat intervals, and an overall loudness measure. A drop is a
+ * beat where the bass suddenly comes back well above its level over the
+ * last few seconds, as after a build-up or breakdown.
  */
 
 /** In-place radix-2 FFT. Lengths must be powers of two. */
@@ -63,6 +65,8 @@ export interface MusicFeatures {
   energy: number
   /** True when the input is effectively silent. */
   silent: boolean
+  /** True on the beat where a drop lands. */
+  drop: boolean
 }
 
 export interface AnalyzerOptions {
@@ -76,6 +80,16 @@ export interface AnalyzerOptions {
 
 const SILENCE_DB = -55
 const HISTORY_FRAMES = 43 // about one second at the default frame rate
+/** Drops closer together than this are treated as the same section. */
+const DROP_COOLDOWN_MS = 8000
+/** Sound must have been playing this long before a drop can register, so a track starting is not one. */
+const DROP_WARMUP_MS = 4000
+/** Silence longer than this ends the track as far as drop detection is concerned. */
+const DROP_RESET_SILENCE_MS = 3000
+/** How fast the remembered peak levels sag, so a few quiet seconds set up a drop. */
+const DROP_PEAK_DECAY_DB_PER_S = 2.5
+/** How long after a beat onset its bass can still mark a drop. */
+const DROP_ONSET_WINDOW_MS = 120
 
 export class MusicAnalyzer {
   readonly frameSize: number
@@ -95,6 +109,14 @@ export class MusicAnalyzer {
   private beatIntervals: number[] = []
   private lowBins: [number, number]
   private fluxBins: number
+  // Drop detection: decaying peaks of the bass and overall levels, in dB
+  private bassPeak: number | null = null
+  private levelPeak: number | null = null
+  private lastFrameAt: number | null = null
+  private dropWindowUntil = -Infinity
+  private soundSince: number | null = null
+  private silentSince: number | null = null
+  private lastDropAt = -Infinity
 
   constructor(options: AnalyzerOptions) {
     this.sampleRate = options.sampleRate
@@ -187,6 +209,8 @@ export class MusicAnalyzer {
     if (hist.length > HISTORY_FRAMES) hist.shift()
     this.prevFlux = flux
 
+    const drop = this.detectDrop(lowEnergy, db, beat, silent, timeMs)
+
     const beatRate = this.beatIntervals.length ? 1000 / median(this.beatIntervals) : 0
     const target = silent ? 0 : Math.min(1, loudness * 0.6 + Math.min(1, beatRate / 3) * 0.4)
     this.energy += (target - this.energy) * 0.02
@@ -198,9 +222,42 @@ export class MusicAnalyzer {
       beatStrength,
       tempo: this.tempo(),
       energy: this.energy,
-      silent
+      silent,
+      drop
     }
   }
+
+  private detectDrop(lowEnergy: number, db: number, beat: boolean, silent: boolean, timeMs: number): boolean {
+    if (silent) {
+      if (this.silentSince === null) this.silentSince = timeMs
+      if (timeMs - this.silentSince >= DROP_RESET_SILENCE_MS) this.soundSince = null
+    } else {
+      this.silentSince = null
+      if (this.soundSince === null) this.soundSince = timeMs
+    }
+
+    const bassDb = Math.max(-100, 10 * Math.log10(lowEnergy / this.frameSize + 1e-12))
+    const levelDb = Math.max(-100, db)
+    // Recent peaks that sag slowly, so steady kicks keep them up and a breakdown lets them fall
+    const dt = this.lastFrameAt === null ? 0 : Math.max(0, timeMs - this.lastFrameAt) / 1000
+    this.lastFrameAt = timeMs
+    const bassRef = this.bassPeak === null ? bassDb : this.bassPeak - DROP_PEAK_DECAY_DB_PER_S * dt
+    const levelRef = this.levelPeak === null ? levelDb : this.levelPeak - DROP_PEAK_DECAY_DB_PER_S * dt
+    this.bassPeak = Math.max(bassDb, bassRef)
+    this.levelPeak = Math.max(levelDb, levelRef)
+
+    // A beat's onset frame often lands just before the kick's bass does, so look a few frames on
+    if (beat) this.dropWindowUntil = timeMs + DROP_ONSET_WINDOW_MS
+    if (timeMs > this.dropWindowUntil || silent || this.soundSince === null) return false
+    if (timeMs - this.soundSince < DROP_WARMUP_MS || timeMs - this.lastDropAt < DROP_COOLDOWN_MS) return false
+    const rise = 10 - this.sensitivity * 4 // dB; 7.6 at the default sensitivity
+    // The bass jumps well past where it has been, and the whole mix is at least as loud as lately
+    if (bassDb - bassRef < rise || levelDb < levelRef - 3) return false
+    this.lastDropAt = timeMs
+    this.dropWindowUntil = -Infinity
+    return true
+  }
+
 
   /** Tempo from the median beat interval, folded into a typical musical range. */
   public tempo(): number | null {

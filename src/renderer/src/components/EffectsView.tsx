@@ -85,6 +85,7 @@ export const EffectsView: React.FC<EffectsViewProps> = ({ snapshot, lights, isDe
               disabled={noLights}
               onOpen={() => setOpenId(effect.id)}
               onToggle={(on) => onToggle(effect.id, on)}
+              note={yieldNote(effect, snapshot)}
             />
           </motion.div>
         ))}
@@ -100,7 +101,9 @@ export const EffectsView: React.FC<EffectsViewProps> = ({ snapshot, lights, isDe
           <span className="text-xs font-medium text-white">Effect safety and performance</span>
         </span>
         <span className="flex items-center gap-2 text-[11px] text-zinc-500">
-          Up to {snapshot.global.maxFlashesPerSecond} flashes per second
+          {snapshot.global.bulbProtection
+            ? 'Bulb protection on'
+            : `Up to ${snapshot.global.maxFlashesPerSecond} flashes per second`}
           {snapshot.global.reduceIntensity ? ', reduced intensity' : ''}
           <ChevronRight className="w-3.5 h-3.5" />
         </span>
@@ -118,13 +121,22 @@ export const EffectsView: React.FC<EffectsViewProps> = ({ snapshot, lights, isDe
   )
 }
 
+/** Music and Album color step aside on the lights Screen Sync drives; say so on their cards. */
+function yieldNote(effect: EffectSnapshotData, snapshot: EffectsSnapshotData): string | null {
+  if (effect.id !== 'music' && effect.id !== 'album') return null
+  const screen = snapshot.effects.find((e) => e.id === 'screen')
+  if (!effect.settings.enabled || !screen || screen.status !== 'active') return null
+  return 'Screen Sync is controlling the lights it has a position for, so this effect waits on those lights.'
+}
+
 const EffectCard: React.FC<{
   effect: EffectSnapshotData
   lights: NormalizedLightState[]
   disabled: boolean
   onOpen: () => void
   onToggle: (on: boolean) => void
-}> = ({ effect, lights, disabled, onOpen, onToggle }) => {
+  note?: string | null
+}> = ({ effect, lights, disabled, onOpen, onToggle, note }) => {
   const Icon = EFFECT_ICONS[effect.id] || ShieldCheck
   const on = effect.settings.enabled
   const active = effect.status === 'active'
@@ -178,6 +190,8 @@ const EffectCard: React.FC<{
 
         {effect.id === 'games' && <GamesStatusList info={effect.info} enabled={on} />}
 
+        {note && <p className="text-[11px] text-amber-200/80">{note}</p>}
+
         {pausedNames.length > 0 && (
           <p className="text-[11px] text-zinc-500">
             Paused on {pausedNames.join(', ')} because {pausedNames.length === 1 ? 'it was' : 'they were'} changed by hand.
@@ -219,6 +233,7 @@ const SafetySheet: React.FC<{ isOpen: boolean; onClose: () => void; snapshot: Ef
 }) => {
   const api = window.lumos
   const g = snapshot.global
+  const protect = Boolean(g.bulbProtection)
   const [rate, setRate] = useState(g.ratePerSecond)
   const [webhook, setWebhook] = useState<WebhookInfo | null>(null)
 
@@ -236,18 +251,31 @@ const SafetySheet: React.FC<{ isOpen: boolean; onClose: () => void; snapshot: Ef
   return (
     <GlassSheet isOpen={isOpen} onClose={onClose} title="Effect safety" subtitle="Limits that apply to every effect" icon={ShieldCheck}>
       <PhotosensitivityNote />
+      <Group
+        title="Bulb protection"
+        footer="Keeps every light to at most 2 commands per second, 1 flash per second, and 1 power change every 2 seconds, whatever sends them: this app, Apple Home, the webhook, or another computer. Changes in between are combined, so each light still ends on your latest setting. Effects look slower and smoother while it is on."
+      >
+        <Row label="Protect bulbs" hint="Lighter on each bulb's controller and its stored settings.">
+          <ToggleButton on={protect} onChange={(on) => update({ bulbProtection: on })} ariaLabel="Protect bulbs" />
+        </Row>
+      </Group>
       <Group title="Flashing">
-        <Row label="Most flashes per second" hint="Applies to every light and every effect. Never more than three.">
-          <Segmented
-            ariaLabel="Most flashes per second"
-            value={g.maxFlashesPerSecond}
-            options={[
-              { value: 1, label: '1' },
-              { value: 2, label: '2' },
-              { value: 3, label: '3' }
-            ]}
-            onChange={(v) => update({ maxFlashesPerSecond: v })}
-          />
+        <Row
+          label="Most flashes per second"
+          hint={protect ? 'Held at 1 while bulb protection is on.' : 'Applies to every light and every effect. Never more than three.'}
+        >
+          <div className={protect ? 'opacity-40 pointer-events-none' : ''} aria-disabled={protect}>
+            <Segmented
+              ariaLabel="Most flashes per second"
+              value={g.maxFlashesPerSecond}
+              options={[
+                { value: 1, label: '1' },
+                { value: 2, label: '2' },
+                { value: 3, label: '3' }
+              ]}
+              onChange={(v) => update({ maxFlashesPerSecond: v })}
+            />
+          </div>
         </Row>
         <Row label="Reduce intensity" hint="Gentler pulses and flashes, with no sudden jumps in brightness.">
           <ToggleButton on={g.reduceIntensity} onChange={(on) => update({ reduceIntensity: on })} ariaLabel="Reduce intensity" />
@@ -256,7 +284,11 @@ const SafetySheet: React.FC<{ isOpen: boolean; onClose: () => void; snapshot: Ef
 
       <Group
         title="Performance"
-        footer="Lower this if a light seems to lag behind or drop commands. Your own changes are always sent straight away."
+        footer={
+          protect
+            ? 'Held at 2 per second while bulb protection is on.'
+            : 'Lower this if a light seems to lag behind or drop commands. Your own changes are always sent straight away.'
+        }
       >
         <Row label="Commands per second for each light" stacked>
           <RangeControl
@@ -267,6 +299,7 @@ const SafetySheet: React.FC<{ isOpen: boolean; onClose: () => void; snapshot: Ef
             onChange={setRate}
             onCommit={(v) => update({ ratePerSecond: v })}
             format={(v) => `${v} / s`}
+            disabled={protect}
           />
         </Row>
       </Group>

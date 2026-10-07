@@ -1,7 +1,9 @@
 import http from 'http'
 import { app } from 'electron'
 import { join } from 'path'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { existsSync, readFileSync, mkdirSync } from 'fs'
+import { writeFileAtomic } from './atomicWrite'
+import { isLocalHost } from './hostCheck'
 import crypto from 'crypto'
 import { LightManager } from './devices/LightManager'
 import { lumosStore } from './store'
@@ -57,7 +59,7 @@ export class WebhookServer {
     }
 
     try {
-      writeFileSync(this.configFile, JSON.stringify(newConfig, null, 2), 'utf-8')
+      writeFileAtomic(this.configFile, JSON.stringify(newConfig, null, 2))
     } catch (err) {
       console.error('[Lumos Webhook] Failed to save webhook config:', err)
     }
@@ -85,6 +87,14 @@ export class WebhookServer {
     const port = this.config?.port || 8989
 
     this.server = http.createServer(async (req, res) => {
+      // A web page can point its own domain at 127.0.0.1 (DNS rebinding) and reach this server from the
+      // browser. Those requests carry that domain in Host, so only local names are served.
+      if (!isLocalHost(req.headers.host)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Forbidden: unexpected Host header' }))
+        return
+      }
+
       // Allow localhost CORS
       res.setHeader('Access-Control-Allow-Origin', '*')
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
@@ -214,13 +224,13 @@ export class WebhookServer {
     // 2. Set All Power
     if (action === 'all' || (payload.all !== undefined && payload.power !== undefined)) {
       const power = payload.power !== undefined ? Boolean(payload.power) : action === 'all-on'
-      this.lightManager.markAllManual()
+      this.lightManager.markAllManual('power')
       return this.lightManager.setAll(power)
     }
 
     // 3. Toggle
     if (action === 'toggle' && targetId) {
-      this.lightManager.markManual([String(targetId)])
+      this.lightManager.markManual([String(targetId)], 'power')
       return this.lightManager.toggleLight(targetId)
     }
 
@@ -282,7 +292,7 @@ export class WebhookServer {
 
     // 7. General Power or Brightness on All
     if (payload.power !== undefined) {
-      this.lightManager.markAllManual()
+      this.lightManager.markAllManual('power')
       return this.lightManager.setAll(Boolean(payload.power))
     }
 

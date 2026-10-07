@@ -3,6 +3,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import {
   RlMatchTracker,
+  normalizeName,
   applyStatsApiSettings,
   parseRlMessage,
   readStatsApiSettings,
@@ -14,7 +15,15 @@ import { parseLibraryFolders } from '../main/effects/games/installs'
 import { HealthPulseLayer, pulsePeriodMs, PULSE_FAST_MS, PULSE_SLOW_MS, DEATH_HOLD_MS } from '../main/effects/games/healthPulse'
 import { decideAway, nextIdleCheckMs, AwayRules } from '../main/effects/away/awayLogic'
 import { accumulate, brightnessLevel, dayKey, estimateWatts, lastDays, prune, DailyTotals } from '../main/energy/model'
-import { paletteColor, pulseBrightness, pulseEnvelope, PALETTES } from '../main/effects/music/mapping'
+import {
+  paletteColor,
+  partyBrightness,
+  partyColor,
+  partyEnvelope,
+  pulseBrightness,
+  pulseEnvelope,
+  PALETTES
+} from '../main/effects/music/mapping'
 import { parseHelperLine } from '../main/system/systemMonitor'
 import { sanitizeFeatures } from '../main/effects/music/features'
 import { LightOutput } from '../main/effects/output'
@@ -29,9 +38,10 @@ describe('Rocket League: payload parsing', () => {
     expect(e?.type).toBe('state')
     if (e?.type !== 'state') return
     expect(e.players).toEqual([
-      { name: 'Driver One', teamNum: 0 },
-      { name: 'Driver Two', teamNum: 1 }
+      { name: 'Driver One', teamNum: 0, detailed: true },
+      { name: 'Driver Two', teamNum: 1, detailed: false }
     ])
+    expect(e.target).toEqual({ name: 'Driver One', teamNum: 0 })
     expect(e.teams.map((t) => t.colorPrimary)).toEqual(['1873FF', 'FF8A15'])
     expect(e.replay).toBe(false)
   })
@@ -64,7 +74,8 @@ describe('Rocket League: payload parsing', () => {
       type: 'state',
       players: [],
       teams: [],
-      replay: false
+      replay: false,
+      target: null
     })
     expect(parseRlMessage(JSON.stringify({ Event: 'BallHit', Data: {} }))).toEqual({ type: 'other', name: 'BallHit' })
     expect(parseRlMessage('x'.repeat(2 * 1024 * 1024))).toBeNull()
@@ -85,14 +96,58 @@ describe('Rocket League: deciding whose goal it was', () => {
     expect(t.matchOutcome(1)).toBe('loss')
   })
 
-  it('is neutral when the name is unknown or not in the match', () => {
-    const none = new RlMatchTracker('')
-    none.update(state)
-    expect(none.goalOutcome({ name: 'Driver One', teamNum: 0 })).toBe('unknown')
-    const other = new RlMatchTracker('Somebody Else')
-    other.update(state)
-    expect(other.goalOutcome({ name: 'Driver Two', teamNum: 1 })).toBe('unknown')
-    expect(other.matchOutcome(0)).toBe('unknown')
+  const stateWith = (players: Array<{ name: string; teamNum: number; detailed: boolean }>, target: { name: string; teamNum: number } | null, replay = false) => ({
+    type: 'state' as const,
+    players,
+    teams: [],
+    replay,
+    target
+  })
+
+  it('works out your team without a name, from the car details the API sends only for your team', () => {
+    const t = new RlMatchTracker('')
+    t.update(state) // fixture: only Driver One (team 0) has live car details
+    expect(t.getMyTeam()).toBe(0)
+    expect(t.getSource()).toBe('team-data')
+    expect(t.goalOutcome({ name: 'Anyone', teamNum: 0 })).toBe('ours')
+    expect(t.goalOutcome({ name: 'Anyone', teamNum: 1 })).toBe('theirs')
+  })
+
+  it('falls back to the player the camera follows, but not during replays', () => {
+    const t = new RlMatchTracker('')
+    const plain = [
+      { name: 'A', teamNum: 0, detailed: false },
+      { name: 'B', teamNum: 1, detailed: false }
+    ]
+    t.update(stateWith(plain, { name: 'B', teamNum: 1 }, true))
+    expect(t.getMyTeam()).toBeNull()
+    t.update(stateWith(plain, { name: 'B', teamNum: 1 }))
+    expect(t.getMyTeam()).toBe(1)
+    expect(t.getSource()).toBe('camera')
+  })
+
+  it('does not guess while spectating, when every player has car details and no one is followed', () => {
+    const t = new RlMatchTracker('')
+    t.update(
+      stateWith(
+        [
+          { name: 'A', teamNum: 0, detailed: true },
+          { name: 'B', teamNum: 1, detailed: true }
+        ],
+        null
+      )
+    )
+    expect(t.getMyTeam()).toBeNull()
+  })
+
+  it('matches the name regardless of clan tags, capitals, and spacing, and prefers it', () => {
+    for (const shown of ['[TAG] Driver One', 'TAG Driver One', 'driver one', 'Driver_One', '(TAG)DriverOne']) {
+      const t = new RlMatchTracker('Driver One')
+      t.update(stateWith([{ name: shown, teamNum: 1, detailed: false }, { name: 'X', teamNum: 0, detailed: true }], null))
+      expect(t.getMyTeam()).toBe(1)
+      expect(t.getSource()).toBe('name')
+    }
+    expect(normalizeName('[ABC] Some Body')).toBe('somebody')
   })
 
   it('forgets the team when the match is left', () => {
@@ -381,13 +436,32 @@ describe('Music mapping', () => {
     expect(pulseBrightness(60, 1, 0, 1)).toBe(100)
     expect(pulseBrightness(60, 0, 0, 1)).toBeCloseTo(18, 5)
   })
+
+  it('party style hits full brightness at once and goes dark between beats', () => {
+    expect(partyEnvelope(0, 1, 120, false)).toBe(1)
+    expect(partyEnvelope(0, 0.2, 120, false)).toBeLessThan(0.75)
+    // After a drop every beat is a full hit, even a soft one
+    expect(partyEnvelope(0, 0.2, 120, true)).toBe(1)
+    expect(partyEnvelope(400, 1, 120, false)).toBeLessThan(0.1)
+    expect(partyBrightness(80, 1, 0, 0.75)).toBe(100)
+    expect(partyBrightness(80, 0, 0, 0.75)).toBeLessThan(30)
+  })
+
+  it('party style steps through the palette on each beat, neighbours one colour apart', () => {
+    const p = PALETTES.neon
+    expect(partyColor(p, 0, 0, true)).toEqual(p[0])
+    expect(partyColor(p, 1, 0, true)).toEqual(p[1])
+    expect(partyColor(p, 1, 1, true)).toEqual(p[2])
+    expect(partyColor(p, 1, 1, false)).toEqual(p[1])
+    expect(partyColor(p, 3, 0, true)).toEqual(p[0])
+  })
 })
 
 describe('Validation of untrusted local inputs', () => {
   it('parses media helper lines and rejects malformed ones', () => {
-    expect(parseHelperLine('{"t":"sys","peak":0.25,"fullscreen":true}')).toEqual({
+    expect(parseHelperLine('{"t":"sys","peak":0.25,"fullscreen":true,"exclusive":true}')).toEqual({
       kind: 'sys',
-      sys: { peak: 0.25, fullscreen: true }
+      sys: { peak: 0.25, fullscreen: true, exclusive: true }
     })
     const thumb = Buffer.alloc(2 * 2 * 4, 200).toString('base64')
     const media = parseHelperLine(`{"t":"media","status":"Playing","key":"abc123","thumb":"${thumb}","w":2,"h":2}`)
@@ -415,8 +489,47 @@ describe('Validation of untrusted local inputs', () => {
       beatStrength: 0,
       tempo: 300,
       energy: 0,
-      silent: true
+      silent: true,
+      drop: false
     })
     expect(sanitizeFeatures('nope')).toBeNull()
+  })
+})
+
+import { blendViaDark } from '../main/effects/output'
+
+describe('blendViaDark', () => {
+  const colour = { power: true, mode: 'colour' as const, h: 30, s: 40, brightness: 40 }
+  const white = { power: true, mode: 'white' as const, colorTemp: 50, brightness: 80 }
+
+  it('dips to almost nothing before switching from colour to white', () => {
+    const mid = blendViaDark(colour, white, 0.5)
+    expect(mid.mode === 'colour' || mid.mode === 'white').toBe(true)
+    expect((mid as { brightness: number }).brightness).toBeLessThanOrEqual(2)
+  })
+
+  it('stays in colour mode through the first half and in white mode through the second', () => {
+    expect(blendViaDark(colour, white, 0.3).mode).toBe('colour')
+    expect(blendViaDark(colour, white, 0.7).mode).toBe('white')
+  })
+
+  it('never shows the white mode brighter than the colour it came from before it has dimmed', () => {
+    for (let t = 0.5; t < 0.53; t += 0.01) {
+      const o = blendViaDark(colour, white, t) as { mode: string; brightness: number }
+      if (o.mode === 'white') expect(o.brightness).toBeLessThan(10)
+    }
+  })
+
+  it('comes up from off in the target mode, starting from almost nothing', () => {
+    const off = { ...white, power: false }
+    const early = blendViaDark(off, white, 0.1) as { mode: string; brightness: number; power: boolean }
+    expect(early.power).toBe(true)
+    expect(early.mode).toBe('white')
+    expect(early.brightness).toBeLessThan(15)
+  })
+
+  it('ends exactly on the target and starts on the source', () => {
+    expect(blendViaDark(colour, white, 1)).toEqual(white)
+    expect(blendViaDark(colour, white, 0)).toEqual(colour)
   })
 })

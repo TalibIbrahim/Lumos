@@ -1,10 +1,9 @@
 import React from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { AnimatePresence } from 'framer-motion'
 import { Power, Layers } from 'lucide-react'
 import { GlassButton } from './ui/GlassButton'
-import { LightTile } from './LightTile'
+import { TileCell, tileLayoutKey } from './TileCell'
 import { NormalizedLightState, RoomGroup } from '../types'
-import { springs } from '../lib/constants'
 
 interface RoomSectionProps {
   room: RoomGroup
@@ -42,6 +41,7 @@ export const RoomSection: React.FC<RoomSectionProps> = ({
   const activeLights = roomLights.filter((l) => l.online && l.power).length
   const anyOn = activeLights > 0
   const allDeviceIds = roomLights.map((l) => l.id)
+  const layoutKey = tileLayoutKey(roomLights)
 
   return (
     <section className="flex flex-col gap-3.5 select-none">
@@ -76,23 +76,16 @@ export const RoomSection: React.FC<RoomSectionProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         <AnimatePresence mode="popLayout">
           {roomLights.map((light) => (
-            <motion.div
+            <TileCell
               key={light.id}
-              layout
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.94 }}
-              transition={springs.default}
-            >
-              <LightTile
-                light={light}
-                onToggle={onToggleLight}
-                onBrightnessChange={onBrightnessChange}
-                onOpenDetail={onOpenDetail}
-                onContextMenu={onContextMenu}
-                isFocused={focusedLightId === light.id}
-              />
-            </motion.div>
+              light={light}
+              onToggle={onToggleLight}
+              onBrightnessChange={onBrightnessChange}
+              onOpenDetail={onOpenDetail}
+              onContextMenu={onContextMenu}
+              isFocused={focusedLightId === light.id}
+              layoutKey={layoutKey}
+            />
           ))}
         </AnimatePresence>
       </div>

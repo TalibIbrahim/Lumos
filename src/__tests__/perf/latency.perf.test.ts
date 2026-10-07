@@ -85,7 +85,7 @@ describe.skipIf(!RUN)('Perf: command pipeline latency', () => {
     expect(pipeline.length).toBe(60)
   }, 30000)
 
-  it('discrete commands while Music animates other lights', async () => {
+  it('discrete commands while an ambient effect (Screen Sync or Music) animates other lights', async () => {
     if (process.env.LUMOS_PERF_DIRECT === '1') return
     // Music-style animation on four other bulbs sharing the same compositor and event loop
     const lights: Light[] = []
@@ -132,7 +132,7 @@ describe.skipIf(!RUN)('Perf: command pipeline latency', () => {
     }
     compositor.removeLayer('music')
     console.log(
-      `[perf] discrete with music: pipeline p50=${pct(pipeline, 0.5)}ms p95=${pct(pipeline, 0.95)}ms | end-to-end p50=${pct(endToEnd, 0.5)}ms p95=${pct(endToEnd, 0.95)}ms`
+      `[perf] discrete with ambient effect running: pipeline p50=${pct(pipeline, 0.5)}ms p95=${pct(pipeline, 0.95)}ms | end-to-end p50=${pct(endToEnd, 0.5)}ms p95=${pct(endToEnd, 0.95)}ms`
     )
     expect(pipeline.length).toBe(60)
   }, 30000)

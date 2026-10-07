@@ -1,18 +1,30 @@
 import { EventEmitter } from 'events'
 import TuyAPI from 'tuyapi'
-import { resolveIpFromMac } from './arp'
+import { findIpForMac, resolveIpFromMac } from './arp'
+import { PROTECTED_LIMITS } from '../effects/safety'
+
+let bulbProtection = false
+
+/** Turns the per-light write limits of bulb protection on or off for every light. */
+export function setBulbProtection(on: boolean): void {
+  bulbProtection = on
+}
 import {
   TinyTuyaDevice,
   NormalizedLightState,
   DPSConfig,
   DEFAULT_DPS,
   DeviceCapabilities,
-  ColorHS
+  ColorHS,
+  LightPosition
 } from '../types'
 import { latencyTracker } from '../latency'
 import { updatePersistedDeviceIp } from '../config'
 import { LightOutput, OutputField, changedFields, quantize } from '../effects/output'
 import { Announcement, announcements, claimAddress, clearScanCache, locateDevice, probeTcp, releaseAddress } from './discovery'
+
+/** A reply later than this is not matched to the command that was waiting. */
+const ACK_TIMEOUT_MS = 2000
 
 /** Why an offline light cannot be reached, shown in the UI. */
 export type ConnectionIssue = 'searching' | 'busy' | 'unreachable' | 'key-mismatch'
@@ -52,6 +64,9 @@ export class Light extends EventEmitter {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private pendingDps: Record<string, any> = {}
   private isFlushInFlight = false
+  private lastWriteAt = 0
+  private lastPowerWriteAt = 0
+  private lastPowerWritten: unknown = undefined
 
   // Output tracking. The fields below (power, brightness, ...) hold the base
   // state, which is the user's intent. What the bulb is actually told to show
@@ -64,6 +79,13 @@ export class Light extends EventEmitter {
   public suppressReportsUntil = 0
   /** Label of the effect currently shaping this light's output, if any. */
   public activeEffect?: string
+
+  /**
+   * How long the bulb takes to answer a command (smoothed), measured from the
+   * status reply it sends after each change. 0 until measured.
+   */
+  public ackLatencyMs = 0
+  private ackPendingSince = 0
 
   // Current internal state
   public power = false
@@ -80,6 +102,7 @@ export class Light extends EventEmitter {
   public room?: string
   public order?: number
   public hidden?: boolean
+  public position?: LightPosition
 
   constructor(device: TinyTuyaDevice, onStateChange?: (state: NormalizedLightState) => void, isDemo: boolean = false) {
     super()
@@ -93,6 +116,7 @@ export class Light extends EventEmitter {
     let initialIp = rawIp.toLowerCase() === 'auto' ? '' : rawIp
 
     // If MAC is known, check ARP table first. ARP is authoritative for physical devices on LAN.
+    // This reads the table LightManager loaded just before; connect() looks again without blocking.
     if (this.mac && !this.isDemo) {
       const arpIp = resolveIpFromMac(this.mac)
       if (arpIp) {
@@ -286,6 +310,7 @@ export class Light extends EventEmitter {
       this.tuya.on('data', (data: any) => {
         this.hasReceivedData = true
         this.lastSeen = Date.now()
+        this.noteAck()
         this.handleTuyaData(data)
       })
 
@@ -313,7 +338,8 @@ export class Light extends EventEmitter {
 
     try {
       if (this.mac) {
-        const arpIp = resolveIpFromMac(this.mac)
+        const arpIp = await findIpForMac(this.mac)
+        if (this.isDestroyed || this.isConnected) return
         if (arpIp && arpIp !== this.ip) {
           console.log(`[Lumos Light ${this.name}] Target IP updated via ARP: ${this.ip} -> ${arpIp}`)
           this.ip = arpIp
@@ -324,7 +350,8 @@ export class Light extends EventEmitter {
 
       if (!this.ip) {
         if (this.mac) {
-          const arpIp = resolveIpFromMac(this.mac)
+          const arpIp = await findIpForMac(this.mac)
+          if (this.isDestroyed || this.isConnected) return
           if (arpIp) {
             this.ip = arpIp
             console.log(`[Lumos Light ${this.name}] Resolved LAN IP from ARP: ${this.ip}`)
@@ -487,7 +514,8 @@ export class Light extends EventEmitter {
 
       try {
         if (this.mac) {
-          const arpIp = resolveIpFromMac(this.mac)
+          const arpIp = await findIpForMac(this.mac)
+          if (this.isDestroyed || this.isConnected) return
           if (arpIp && arpIp !== this.ip) {
             console.log(`[Lumos Light ${this.name}] Reconnect detected new IP via ARP: ${this.ip} -> ${arpIp}`)
             this.ip = arpIp
@@ -498,7 +526,8 @@ export class Light extends EventEmitter {
 
         if (!this.ip) {
           if (this.mac) {
-            const arpIp = resolveIpFromMac(this.mac)
+            const arpIp = await findIpForMac(this.mac)
+            if (this.isDestroyed || this.isConnected) return
             if (arpIp) {
               this.ip = arpIp
               updatePersistedDeviceIp(this.id, this.ip)
@@ -681,6 +710,7 @@ export class Light extends EventEmitter {
       room: this.room,
       order: this.order,
       hidden: this.hidden,
+      position: this.position,
       effect: this.activeEffect,
       connectionIssue: this.isConnected ? undefined : (this.connectionIssue ?? undefined)
     }
@@ -698,6 +728,8 @@ export class Light extends EventEmitter {
     if (this.isDemo) {
       this.pendingDps = {}
       latencyTracker.record('set_batch', this.id, 12)
+      // Simulated lights answer after a typical delay
+      setTimeout(() => this.noteAck(), 25)
       return true
     }
 
@@ -706,8 +738,21 @@ export class Light extends EventEmitter {
 
     try {
       while (Object.keys(this.pendingDps).length > 0) {
+        // With bulb protection on, wait for this light's next allowed write; anything queued
+        // meanwhile is merged into the same write
+        const wait = this.protectionWaitMs()
+        if (wait > 0) {
+          await new Promise((resolve) => setTimeout(resolve, wait))
+          if (!this.isConnected || !this.tuya || this.isDestroyed) return false
+        }
         const batch = { ...this.pendingDps }
         this.pendingDps = {}
+        this.lastWriteAt = Date.now()
+        const powerKey = this.dpsMap.power.toString()
+        if (powerKey in batch && batch[powerKey] !== this.lastPowerWritten) {
+          this.lastPowerWritten = batch[powerKey]
+          this.lastPowerWriteAt = this.lastWriteAt
+        }
 
         const startTime = performance.now()
         await this.tuya.set({
@@ -725,6 +770,18 @@ export class Light extends EventEmitter {
     } finally {
       this.isFlushInFlight = false
     }
+  }
+
+  private protectionWaitMs(): number {
+    if (!bulbProtection) return 0
+    const now = Date.now()
+    let wait = this.lastWriteAt + 1000 / PROTECTED_LIMITS.commandsPerSecond - now
+    const powerKey = this.dpsMap.power.toString()
+    // Only a change of power state waits; repeating the current state does not
+    if (powerKey in this.pendingDps && this.pendingDps[powerKey] !== this.lastPowerWritten) {
+      wait = Math.max(wait, this.lastPowerWriteAt + PROTECTED_LIMITS.powerChangeIntervalMs - now)
+    }
+    return wait
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -766,6 +823,7 @@ export class Light extends EventEmitter {
 
     this.lastSentOutput = next
     this.emit('output', next)
+    this.markAckPending()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const dps: Record<string, any> = {}
     const key = (n: number): string => n.toString()
@@ -775,7 +833,8 @@ export class Light extends EventEmitter {
       return Object.keys(dps).length > 0 ? this.queueDpsUpdate(dps) : true
     }
 
-    const modeChanged = fields.has('mode')
+    // Coming back on from off always restates the mode: the bulb may still be in the one it was left in
+    const modeChanged = fields.has('mode') || (fields.has('power') && next.power)
     if (next.mode === 'colour') {
       if (modeChanged) dps[key(this.dpsMap.mode)] = 'colour'
       if (modeChanged || fields.has('color') || fields.has('brightness')) {
@@ -847,6 +906,25 @@ export class Light extends EventEmitter {
     }
     if (this.outputSink) return this.outputSink(this)
     return this.sendOutput(this.baseOutput())
+  }
+
+  private markAckPending(): void {
+    const now = Date.now()
+    // Bulbs do not always reply (for example to a command that changes nothing),
+    // so a missing reply is forgotten rather than counted as slow
+    if (!this.ackPendingSince || now - this.ackPendingSince > ACK_TIMEOUT_MS) this.ackPendingSince = now
+  }
+
+  private noteAck(): void {
+    if (!this.ackPendingSince) return
+    const ms = Date.now() - this.ackPendingSince
+    this.ackPendingSince = 0
+    if (ms <= ACK_TIMEOUT_MS) this.recordAck(ms)
+  }
+
+  private recordAck(ms: number): void {
+    this.ackLatencyMs = this.ackLatencyMs ? this.ackLatencyMs * 0.8 + ms * 0.2 : ms
+    this.emit('ack', ms)
   }
 
   public hasForcedFields(): boolean {

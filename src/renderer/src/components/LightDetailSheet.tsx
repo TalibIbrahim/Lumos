@@ -11,6 +11,7 @@ import {
   Check,
   EyeOff,
   Layers,
+  MonitorPlay,
   Thermometer,
   Moon,
   Coffee,
@@ -22,7 +23,7 @@ import { GlassSurface } from './ui/GlassSurface'
 import { GlassButton } from './ui/GlassButton'
 import { CapsuleSlider } from './ui/CapsuleSlider'
 import { ColorWheel } from './ui/ColorWheel'
-import { NormalizedLightState, ColorHS, DeviceMetadata, RoomGroup } from '../types'
+import { NormalizedLightState, ColorHS, DeviceMetadata, RoomGroup, LightPosition } from '../types'
 import { offlineHelp, offlineLabel } from '../lib/connection'
 import { springs } from '../lib/constants'
 import { cctToRgb, hsvToRgb } from '../lib/color'
@@ -494,6 +495,27 @@ export const LightDetailSheet: React.FC<LightDetailSheetProps> = ({
                     </select>
                   </div>
                 )}
+
+                {/* Position relative to the screen, for Screen Sync */}
+                <div className="p-3.5 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-zinc-300 font-medium">
+                    <MonitorPlay className="w-3.5 h-3.5 text-zinc-400" />
+                    <label htmlFor="light-position">Position by the screen</label>
+                  </div>
+                  <select
+                    id="light-position"
+                    value={light.position ?? ''}
+                    onChange={(e) => onUpdateMetadata?.(light.id, { position: (e.target.value || null) as LightPosition | null })}
+                    className="bg-zinc-900 border border-white/10 rounded-lg text-xs text-white px-2.5 py-1 focus:outline-none focus:border-amber-400"
+                  >
+                    <option value="">Not used by Screen Sync</option>
+                    <option value="left">Left</option>
+                    <option value="right">Right</option>
+                    <option value="center">Center</option>
+                    <option value="top">Top</option>
+                    <option value="bottom">Bottom</option>
+                  </select>
+                </div>
 
                 {/* Hardware Countdown Timer (if supported) */}
                 {caps.hasCountdown && onSetCountdown && (

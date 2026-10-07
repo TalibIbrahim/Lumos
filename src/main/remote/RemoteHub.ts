@@ -12,7 +12,7 @@ export const BEACON_PORT = 8991
 const PAIR_CODE_TTL_MS = 10 * 60 * 1000
 const MAX_FAILED_PAIRINGS = 5
 const FAILED_PAIRING_WINDOW_MS = 10 * 60 * 1000
-const BEACON_INTERVAL_MS = 3000
+const BEACON_INTERVAL_MS = 7000
 const MAX_MESSAGE = 1024 * 1024
 const SKIP_INTERFACES = ['vethernet', 'virtualbox', 'vmware', 'loopback', 'bluetooth', 'wsl', 'hyper-v']
 

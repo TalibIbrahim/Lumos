@@ -72,3 +72,46 @@ export function pulseBrightness(baseLevel: number, pulse: number, low: number, d
   const drive = Math.max(pulse, low * 0.35)
   return clamp(lerp(floor, peak, clamp(drive, 0, 1)), 1, 100)
 }
+
+/** How long a drop holds every light at full white before the colours come back. */
+export const DROP_BURST_MS = 350
+/** After a drop, every beat hits full brightness for this long. */
+export const DROP_SECTION_MS = 16000
+
+/**
+ * Party style beat envelope: the hit lands at once and falls away quickly,
+ * so the lights snap to the beat and sit dark in between. Inside the section
+ * after a drop every beat is a full hit regardless of its strength.
+ */
+export function partyEnvelope(msSinceBeat: number, strength: number, tempo: number | null, afterDrop: boolean): number {
+  if (msSinceBeat < 0) return 0
+  // Strong beats are full hits; softer ones land a little lower
+  const peak = afterDrop ? 1 : Math.min(1, 0.6 + 0.55 * clamp(strength, 0, 1))
+  // Held long enough that the next command to the bulb carries the peak
+  const hold = 120
+  if (msSinceBeat < hold) return peak
+  const interval = tempo ? 60000 / tempo : 500
+  const tau = clamp(interval * 0.22, 90, 250)
+  return peak * Math.exp(-(msSinceBeat - hold) / tau)
+}
+
+/**
+ * Party style brightness: a deep floor between beats (set by the pulse depth,
+ * 0..1) and full brightness on a full hit.
+ */
+export function partyBrightness(baseLevel: number, pulse: number, low: number, depth: number): number {
+  const d = clamp(depth, 0, 1)
+  const floor = clamp(baseLevel * (1 - d * 0.9), 3, 100)
+  const drive = Math.max(pulse, low * 0.25)
+  return clamp(lerp(floor, 100, clamp(drive, 0, 1)), 1, 100)
+}
+
+/**
+ * Party style colour: the palette steps to its next colour on each beat. With
+ * the wave on, neighbouring lights sit one colour apart.
+ */
+export function partyColor(palette: HueSat[], step: number, index: number, wave: boolean): HueSat {
+  if (palette.length === 0) return { h: 0, s: 0 }
+  const i = (step + (wave ? index : 0)) % palette.length
+  return palette[(i + palette.length) % palette.length]
+}

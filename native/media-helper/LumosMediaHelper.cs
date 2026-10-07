@@ -34,9 +34,20 @@ namespace Lumos
         // 2 = busy (full-screen app), 3 = running a Direct3D full-screen app, 4 = presentation mode
         public static bool IsFullScreenActive()
         {
-            int state;
-            if (SHQueryUserNotificationState(out state) != 0) return false;
+            int state = NotificationState();
             return state == 2 || state == 3 || state == 4;
+        }
+
+        // A Direct3D app running in exclusive full screen, which screen capture often cannot see
+        public static bool IsExclusiveFullScreen()
+        {
+            return NotificationState() == 3;
+        }
+
+        private static int NotificationState()
+        {
+            int state;
+            return SHQueryUserNotificationState(out state) == 0 ? state : -1;
         }
 
         [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
@@ -196,8 +207,9 @@ namespace Lumos
                 if (!running) break;
 
                 bool full = Native.IsFullScreenActive();
+                bool exclusive = Native.IsExclusiveFullScreen();
                 Emit(string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                    "{{\"t\":\"sys\",\"peak\":{0:0.0000},\"fullscreen\":{1}}}", peak, full ? "true" : "false"));
+                    "{{\"t\":\"sys\",\"peak\":{0:0.0000},\"fullscreen\":{1},\"exclusive\":{2}}}", peak, full ? "true" : "false", exclusive ? "true" : "false"));
 
                 if (!mediaEnabled) continue;
                 try

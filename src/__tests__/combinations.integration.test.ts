@@ -90,6 +90,42 @@ describe('Combinations', () => {
     await manager.shutdown()
   })
 
+  it('party style snaps to the beat, goes full white on a drop, and stays inside the flash cap', async () => {
+    const { manager, lights, music } = setup()
+    music.updateSettings({ style: 'party' })
+    await manager.setEnabled('music', true)
+    await advance(4000)
+    expect(music.getStatus()).toBe('active')
+
+    // Before the drop: beats reach full brightness, the floor between them is dark, and the colour steps
+    const levels: number[] = []
+    const hues = new Set<number>()
+    for (let i = 0; i < 60; i++) {
+      await advance(33)
+      const out = lights[0].lastSentOutput!
+      levels.push(out.brightness)
+      if (out.mode === 'colour') hues.add(out.h)
+    }
+    expect(Math.max(...levels)).toBe(100)
+    expect(Math.min(...levels)).toBeLessThan(40)
+    expect(hues.size).toBeGreaterThan(1)
+
+    // The simulated track breaks down at 30 seconds and drops at 34
+    await advance(26000)
+    let sawBurst = false
+    const guard = manager.compositor.getFlashGuard()
+    for (let i = 0; i < 150; i++) {
+      await advance(33)
+      const out = lights[0].lastSentOutput!
+      if (out.mode === 'white' && out.brightness === 100) sawBurst = true
+      // No light ever gets more sudden changes than the flash cap inside a second
+      for (const light of lights) expect(guard.recentCount(light.id, Date.now())).toBeLessThanOrEqual(3)
+    }
+    expect(sawBurst).toBe(true)
+    expect(music.snapshot().info.lastDropAt).not.toBeNull()
+    await manager.shutdown()
+  })
+
   it('idle during music dims on top of the music, and restores to music', async () => {
     const { manager, lights, power, away } = setup()
     away.updateSettings({ stayOnDuringMedia: false, idleMinutes: 1, dimPercent: 10 })

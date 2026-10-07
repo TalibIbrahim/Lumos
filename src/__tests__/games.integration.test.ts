@@ -110,7 +110,7 @@ describe('Integration: Rocket League Stats API', () => {
     expect(r.lights[0].mode).toBe('white') // the base state was never touched
   }, 20000)
 
-  it('flashes the opponent colour for the other team, and neutral when the team is unknown', async () => {
+  it('flashes the opponent colour for the other team, and finds your team even when the name matches no one', async () => {
     await r.manager.setEnabled('games', true)
     await waitFor(() => wss.clients.size > 0, 6000, 'client connection')
 
@@ -121,15 +121,17 @@ describe('Integration: Rocket League Stats API', () => {
     expect(r.lights[0].lastSentOutput!.h).toBe(0)
     await waitFor(() => r.lights[0].lastSentOutput?.mode === 'white', 3000, 'restore')
 
-    // Unknown player name: neutral colour
+    // A name that matches no one: the team still comes from the game's own data
     r.games.updateSettings({ rocketLeague: { ...r.games.getSettings().rocketLeague, playerName: 'Nobody' } })
     await waitFor(() => wss.clients.size > 0, 6000, 'reconnect after settings change')
     await sleep(200)
     broadcast(fixture('rl-update-state.json'))
     await sleep(100)
     broadcast(fixture('rl-goal-blue.json'))
-    await waitFor(() => r.lights[0].lastSentOutput?.mode === 'colour', 2000, 'neutral flash')
-    expect(r.lights[0].lastSentOutput!.h).toBe(45)
+    await waitFor(() => r.lights[0].lastSentOutput?.mode === 'colour', 2000, 'your goal flash')
+    expect(r.lights[0].lastSentOutput!.h).toBe(130)
+    expect((r.games.snapshot().info as any).rocketLeague.teamSource).toBe('team-data')
+    expect((r.games.snapshot().info as any).rocketLeague.lastGoal.outcome).toBe('ours')
   }, 20000)
 
   it('ignores malformed messages without disconnecting', async () => {

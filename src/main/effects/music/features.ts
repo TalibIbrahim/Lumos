@@ -13,6 +13,7 @@ export function sanitizeFeatures(raw: unknown): MusicFeatures | null {
     beatStrength: num(o.beatStrength, 0, 0, 1),
     tempo,
     energy: num(o.energy, 0, 0, 1),
-    silent: bool(o.silent, true)
+    silent: bool(o.silent, true),
+    drop: bool(o.drop, false)
   }
 }

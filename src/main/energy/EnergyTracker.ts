@@ -22,6 +22,7 @@ export interface EnergyPrice {
 }
 
 export interface EnergyReport {
+  enabled: boolean
   range: EnergyRange
   totalKwh: number
   estimatedCost: number | null
@@ -37,6 +38,8 @@ interface Stored {
   price: EnergyPrice | null
   names: Record<string, string>
   days: DailyTotals
+  /** Tracking is opt in: it stays off until someone turns it on. */
+  enabled?: boolean
 }
 
 interface Tracked {
@@ -44,7 +47,7 @@ interface Tracked {
   watts: number
 }
 
-const FLUSH_MS = 60000
+const FLUSH_MS = 300000
 const KEEP_DAYS = 400
 
 export interface LightProvider {
@@ -54,7 +57,7 @@ export interface LightProvider {
 /**
  * Tracks estimated energy per bulb. The draw is integrated whenever a bulb's
  * output changes, stored as compact daily totals (not a raw log), and flushed
- * to disk every minute so a crash loses at most a minute.
+ * to disk every five minutes and on exit, so a crash loses at most five minutes.
  */
 export class EnergyTracker extends EventEmitter {
   private data: Stored = { version: 1, ratedWatts: {}, price: null, names: {}, days: {} }
@@ -74,14 +77,36 @@ export class EnergyTracker extends EventEmitter {
     this.load()
   }
 
+  public isEnabled(): boolean {
+    return this.data.enabled === true
+  }
+
+  /** Turns tracking on or off. Off books what is pending, releases every listener and timer, and keeps the history. */
+  public setEnabled(on: boolean): void {
+    if (on === this.isEnabled()) return
+    if (on) {
+      this.data.enabled = true
+      this.dirty = true
+      this.save()
+      this.start()
+    } else {
+      this.stop()
+      this.tracked.clear()
+      this.data.enabled = false
+      this.dirty = true
+      this.save()
+    }
+  }
+
   public start(): void {
-    if (this.flushTimer) return
+    if (!this.isEnabled() || this.flushTimer) return
     this.flushTimer = setInterval(() => this.checkpoint(), FLUSH_MS)
     this.attach()
   }
 
   /** Re-binds to the current lights. Call after lights reload. */
   public attach(): void {
+    if (!this.flushTimer) return
     const now = this.clock()
     // Close out lights that went away
     for (const [id, l] of this.bound) {
@@ -229,6 +254,7 @@ export class EnergyTracker extends EventEmitter {
       .sort((a, b) => b.kwh - a.kwh)
     const price = this.data.price
     return {
+      enabled: this.isEnabled(),
       range,
       totalKwh,
       estimatedCost: price ? totalKwh * price.perKwh : null,
@@ -277,7 +303,7 @@ export class EnergyTracker extends EventEmitter {
       }
       const p = asObj(o.price)
       const price = typeof p.perKwh === 'number' && p.perKwh > 0 ? { perKwh: p.perKwh, currency: str(p.currency, '$', 4) } : null
-      this.data = { version: 1, ratedWatts: rated, price, names, days }
+      this.data = { version: 1, ratedWatts: rated, price, names, days, enabled: o.enabled === true }
     } catch (err) {
       console.warn('[Lumos Energy] Could not read energy history, starting fresh:', err)
     }

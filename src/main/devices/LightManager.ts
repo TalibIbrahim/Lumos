@@ -3,6 +3,7 @@ import { loadDevicesConfig } from '../config'
 import { DEMO_DEVICES } from '../demo'
 import { TinyTuyaDevice, NormalizedLightState } from '../types'
 import { announcements, Announcement } from './discovery'
+import { getArpTable } from './arp'
 
 export class LightManager {
   private lights: Map<string, Light> = new Map()
@@ -14,18 +15,33 @@ export class LightManager {
 
   /** Called after the set of lights is created or replaced. */
   public onLightsLoaded?: () => void
-  /** Called before lights are changed by hand (app UI, HomeKit, webhook). */
-  public onManualChange?: (lightIds: string[]) => void
+  /**
+   * Called before lights are changed by hand (app UI, HomeKit, webhook).
+   * 'power' is a plain on or off; 'state' changes colour or brightness.
+   */
+  public onManualChange?: (lightIds: string[], kind: 'power' | 'state') => void
 
   constructor(onStateBroadcast: (state: NormalizedLightState) => void) {
     this.onStateBroadcast = onStateBroadcast
     announcements.on('announce', (a: Announcement) => this.lights.get(a.id)?.onAnnounced(a))
   }
 
+  /**
+   * Listens for lights announcing themselves, so a light that moved or changed is found
+   * without a scan. A light only announces while nothing is connected to it, and a connected
+   * light ignores announcements, so this listens only while some light is not connected.
+   */
+  private syncAnnouncements(): void {
+    const needed =
+      !this.isDemoMode && !this.remoteMode && [...this.lights.values()].some((l) => !l.isConnected && !l.isDemo)
+    if (needed) announcements.start()
+    else announcements.stop()
+  }
+
   /** Marks lights as changed by hand so ambient effects step aside for them. */
-  public markManual(lightIds: string[]): void {
+  public markManual(lightIds: string[], kind: 'power' | 'state' = 'state'): void {
     const ids = lightIds.filter((id) => this.lights.has(id))
-    if (ids.length > 0) this.onManualChange?.(ids)
+    if (ids.length > 0) this.onManualChange?.(ids, kind)
   }
 
   public setRemoteMode(on: boolean): void {
@@ -38,8 +54,8 @@ export class LightManager {
     return this.remoteMode
   }
 
-  public markAllManual(): void {
-    this.markManual(Array.from(this.lights.keys()))
+  public markAllManual(kind: 'power' | 'state' = 'state'): void {
+    this.markManual(Array.from(this.lights.keys()), kind)
   }
 
   public async init(isDemo: boolean = false): Promise<void> {
@@ -58,6 +74,8 @@ export class LightManager {
     }
 
     const devices = loadDevicesConfig()
+    // Lights pick up an address that changed since last time from the ARP table, read once for all of them
+    if (devices.some((d) => d.mac)) await getArpTable()
     this.loadDevices(devices, false)
   }
 
@@ -115,6 +133,7 @@ export class LightManager {
         device,
         (state) => {
           this.onStateBroadcast(state)
+          this.syncAnnouncements()
         },
         isDemo
       )
@@ -136,10 +155,7 @@ export class LightManager {
       light.connect()
     }
 
-    // Listen for lights announcing themselves, so a light that moved is found
-    // without a scan. Only while this computer talks to real lights.
-    if (!isDemo && !this.remoteMode && this.lights.size > 0) announcements.start()
-    else announcements.stop()
+    this.syncAnnouncements()
 
     this.onLightsLoaded?.()
 

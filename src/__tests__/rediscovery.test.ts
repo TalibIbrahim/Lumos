@@ -70,7 +70,7 @@ vi.mock('../main/config', () => ({
   loadDevicesConfig: () => []
 }))
 
-vi.mock('../main/devices/arp', () => ({ resolveIpFromMac: () => null }))
+vi.mock('../main/devices/arp', () => ({ resolveIpFromMac: () => null, findIpForMac: async () => null, getArpTable: async () => new Map() }))
 
 import { Light } from '../main/devices/Light'
 

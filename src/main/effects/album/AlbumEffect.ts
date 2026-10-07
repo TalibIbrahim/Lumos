@@ -148,7 +148,7 @@ export class AlbumEffect extends Effect<AlbumSettings> implements Layer {
   // --- Layer ---
 
   appliesTo(lightId: string): boolean {
-    return this.colors !== null && this.isTarget(lightId)
+    return this.colors !== null && this.isTarget(lightId) && !this.host.claimedByOther(this.id, lightId)
   }
 
   isAnimating(): boolean {

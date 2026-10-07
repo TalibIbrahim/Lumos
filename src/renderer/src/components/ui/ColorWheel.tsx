@@ -1,6 +1,7 @@
-import React, { useCallback, useRef } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ColorHS } from '../../types'
 import { hsvToRgb } from '../../lib/color'
+import { createThrottle, Throttle } from '../../lib/throttle'
 
 interface ColorWheelProps {
   color?: ColorHS
@@ -29,7 +30,25 @@ export const ColorWheel: React.FC<ColorWheelProps> = ({
   const hueTrackRef = useRef<HTMLDivElement>(null)
   const satTrackRef = useRef<HTMLDivElement>(null)
 
-  const safeColor = color || { h: 35, s: 90, v: 100 }
+  // While dragging, the bars show the pointer's colour at once; the colour reaches the
+  // light at most every 40 ms, and the last one always arrives
+  const [draft, setDraft] = useState<ColorHS | null>(null)
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+  const throttleRef = useRef<Throttle<[ColorHS]> | null>(null)
+  if (!throttleRef.current) throttleRef.current = createThrottle(40, (c: ColorHS) => onChangeRef.current(c))
+  useEffect(() => () => throttleRef.current?.flush(), [])
+
+  const emit = useCallback((c: ColorHS) => {
+    setDraft(c)
+    throttleRef.current?.call(c)
+  }, [])
+  const endDrag = useCallback(() => {
+    throttleRef.current?.flush()
+    setDraft(null)
+  }, [])
+
+  const safeColor = draft || color || { h: 35, s: 90, v: 100 }
   const currentH = typeof safeColor.h === 'number' ? safeColor.h : 35
   const currentS = typeof safeColor.s === 'number' ? safeColor.s : 90
   const currentV = typeof safeColor.v === 'number' ? safeColor.v : 100
@@ -42,9 +61,9 @@ export const ColorWheel: React.FC<ColorWheelProps> = ({
       const rect = hueTrackRef.current.getBoundingClientRect()
       const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
       const h = Math.round(ratio * 360)
-      onChange({ h, s: currentS, v: currentV })
+      emit({ h, s: currentS, v: currentV })
     },
-    [disabled, currentS, currentV, onChange]
+    [disabled, currentS, currentV, emit]
   )
 
   const handleSatPointer = useCallback(
@@ -53,9 +72,9 @@ export const ColorWheel: React.FC<ColorWheelProps> = ({
       const rect = satTrackRef.current.getBoundingClientRect()
       const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
       const s = Math.round(ratio * 100)
-      onChange({ h: currentH, s, v: currentV })
+      emit({ h: currentH, s, v: currentV })
     },
-    [disabled, currentH, currentV, onChange]
+    [disabled, currentH, currentV, emit]
   )
 
   return (
@@ -93,6 +112,8 @@ export const ColorWheel: React.FC<ColorWheelProps> = ({
           onPointerMove={(e) => {
             if (e.buttons > 0) handleHuePointer(e)
           }}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
           className="relative h-6 w-full rounded-xl cursor-pointer border border-white/10 shadow-inner"
           style={{
             background:
@@ -122,6 +143,8 @@ export const ColorWheel: React.FC<ColorWheelProps> = ({
           onPointerMove={(e) => {
             if (e.buttons > 0) handleSatPointer(e)
           }}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
           className="relative h-6 w-full rounded-xl cursor-pointer border border-white/10 shadow-inner overflow-hidden"
           style={{
             background: `linear-gradient(90deg, #ffffff, ${hsvToRgb(currentH, 100, 100).hex})`

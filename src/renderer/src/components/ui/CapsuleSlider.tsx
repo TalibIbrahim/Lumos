@@ -1,5 +1,6 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react'
 import { Sun, LucideIcon } from 'lucide-react'
+import { createThrottle, Throttle } from '../../lib/throttle'
 
 interface CapsuleSliderProps {
   value: number // 0-100
@@ -26,7 +27,11 @@ export const CapsuleSlider: React.FC<CapsuleSliderProps> = ({
   const [localVal, setLocalVal] = useState(value)
   const [isScrubbing, setIsScrubbing] = useState(false)
   const isPointerDownRef = useRef(false)
-  const throttleRef = useRef<NodeJS.Timeout | null>(null)
+  // The value reaches the bulb at most every 40 ms while scrubbing, and the last value always arrives
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+  const throttleRef = useRef<Throttle<[number]> | null>(null)
+  if (!throttleRef.current) throttleRef.current = createThrottle(40, (v: number) => onChangeRef.current(v))
 
   useEffect(() => {
     if (!isScrubbing) {
@@ -55,18 +60,14 @@ export const CapsuleSlider: React.FC<CapsuleSliderProps> = ({
 
     const newVal = calculateRatioFromPointer(e.clientY)
     setLocalVal(newVal)
-    onChange(newVal)
+    throttleRef.current?.call(newVal)
   }
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isPointerDownRef.current || disabled) return
     const newVal = calculateRatioFromPointer(e.clientY)
     setLocalVal(newVal)
-
-    if (throttleRef.current) clearTimeout(throttleRef.current)
-    throttleRef.current = setTimeout(() => {
-      onChange(newVal)
-    }, 40)
+    throttleRef.current?.call(newVal)
   }
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -79,7 +80,7 @@ export const CapsuleSlider: React.FC<CapsuleSliderProps> = ({
       // ignore
     }
 
-    if (throttleRef.current) clearTimeout(throttleRef.current)
+    throttleRef.current?.cancel()
     const newVal = calculateRatioFromPointer(e.clientY)
     onChange(newVal)
     if (onCommit) onCommit(newVal)
@@ -88,7 +89,7 @@ export const CapsuleSlider: React.FC<CapsuleSliderProps> = ({
   const handlePointerCancel = () => {
     isPointerDownRef.current = false
     setIsScrubbing(false)
-    if (throttleRef.current) clearTimeout(throttleRef.current)
+    throttleRef.current?.cancel()
   }
 
   return (

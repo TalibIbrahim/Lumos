@@ -47,6 +47,7 @@ export const FORWARDED_CHANNELS = new Set<string>([
   // Energy (export fetches the CSV from the hub and saves it on this computer)
   'energy-report',
   'energy-set-watts',
+  'energy-set-enabled',
   'energy-set-price',
   'energy-reset',
   'energy-csv',

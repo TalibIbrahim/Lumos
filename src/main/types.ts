@@ -58,6 +58,9 @@ export interface ColorHS {
   v?: number // 0-100
 }
 
+/** Where a light sits relative to the screen, for Screen Sync. */
+export type LightPosition = 'left' | 'right' | 'center' | 'top' | 'bottom'
+
 export interface NormalizedLightState {
   id: string
   name: string
@@ -76,6 +79,7 @@ export interface NormalizedLightState {
   room?: string
   order?: number
   hidden?: boolean
+  position?: LightPosition
   effect?: string // label of the effect currently shaping this light's output
   /** Why an offline light cannot be reached: still searching, in use by another app, or not answering. */
   connectionIssue?: 'searching' | 'busy' | 'unreachable' | 'key-mismatch'
@@ -149,6 +153,8 @@ export interface DeviceMetadata {
   room?: string
   order?: number
   hidden?: boolean
+  /** Position relative to the screen for Screen Sync; null clears it. */
+  position?: LightPosition | null
   lastState?: {
     power: boolean
     brightness: number
@@ -196,6 +202,7 @@ export interface GlobalEffectSettingsData {
   ratePerSecond: number
   maxFlashesPerSecond: number
   reduceIntensity: boolean
+  bulbProtection?: boolean
   resumeOnLaunch: boolean
 }
 
@@ -259,6 +266,7 @@ export interface FoundHubData {
 export type EnergyRangeName = 'today' | '7d' | '30d'
 
 export interface EnergyReportData {
+  enabled: boolean
   range: EnergyRangeName
   totalKwh: number
   estimatedCost: number | null

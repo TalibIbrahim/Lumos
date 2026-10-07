@@ -31,7 +31,7 @@ export function setupIPC(
   energyTracker: EnergyTracker
 ): void {
   // Changes made here come from the user's hand, so ambient effects step aside
-  const manual = (ids: string[]): void => lightManager.markManual(ids)
+  const manual = (ids: string[], kind: 'power' | 'state' = 'state'): void => lightManager.markManual(ids, kind)
 
   // Batch state updates to renderer over ~16ms animation frames
   const pendingBroadcastStates = new Map<string, NormalizedLightState>()
@@ -58,13 +58,13 @@ export function setupIPC(
 
   handle('toggle-light', async (_event, id: string) => {
     if (typeof id !== 'string' || !id) return false
-    manual([id])
+    manual([id], 'power')
     return lightManager.toggleLight(id)
   })
 
   handle('set-power', async (_event, id: string, on: boolean) => {
     if (typeof id !== 'string' || typeof on !== 'boolean') return false
-    manual([id])
+    manual([id], 'power')
     return lightManager.setPower(id, on)
   })
 
@@ -127,13 +127,13 @@ export function setupIPC(
 
   handle('set-all', async (_event, on: boolean) => {
     if (typeof on !== 'boolean') return []
-    lightManager.markAllManual()
+    lightManager.markAllManual('power')
     return lightManager.setAll(on)
   })
 
   handle('set-group-power', async (_event, deviceIds: string[], on: boolean) => {
     if (!Array.isArray(deviceIds) || typeof on !== 'boolean') return []
-    manual(deviceIds)
+    manual(deviceIds, 'power')
     return lightManager.setGroupPower(deviceIds, on)
   })
 
@@ -273,6 +273,12 @@ export function setupIPC(
   handle('energy-set-watts', async (_event, id: string, watts: number) => {
     if (typeof id !== 'string' || typeof watts !== 'number' || !Number.isFinite(watts)) return false
     energyTracker.setRatedWatts(id, watts)
+    return true
+  })
+
+  handle('energy-set-enabled', async (_event, on: unknown) => {
+    if (typeof on !== 'boolean') return false
+    energyTracker.setEnabled(on)
     return true
   })
 

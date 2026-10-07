@@ -123,6 +123,7 @@ export interface LumosAPI {
   // Energy (estimates)
   getEnergyReport: (range: EnergyRangeName) => Promise<EnergyReportData>
   setEnergyWatts: (lightId: string, watts: number) => Promise<boolean>
+  setEnergyEnabled: (enabled: boolean) => Promise<boolean>
   setEnergyPrice: (price: { perKwh: number; currency: string } | null) => Promise<boolean>
   resetEnergy: () => Promise<boolean>
   exportEnergy: () => Promise<{ canceled: boolean; success?: boolean; error?: string }>
@@ -268,6 +269,7 @@ const api: LumosAPI = {
 
   getEnergyReport: (range) => ipcRenderer.invoke('energy-report', range),
   setEnergyWatts: (lightId, watts) => ipcRenderer.invoke('energy-set-watts', lightId, watts),
+  setEnergyEnabled: (enabled) => ipcRenderer.invoke('energy-set-enabled', enabled),
   setEnergyPrice: (price) => ipcRenderer.invoke('energy-set-price', price),
   resetEnergy: () => ipcRenderer.invoke('energy-reset'),
   exportEnergy: () => ipcRenderer.invoke('energy-export'),

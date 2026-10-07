@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { join } from 'path'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { existsSync, readFileSync, mkdirSync, copyFileSync } from 'fs'
+import { writeFileAtomic } from './atomicWrite'
 import {
   LumosStoreData,
   Preset,
@@ -11,6 +12,10 @@ import {
   DeviceMetadata
 } from './types'
 import { LightManager } from './devices/LightManager'
+import { LightPosition } from './types'
+
+const POSITIONS: readonly string[] = ['left', 'right', 'center', 'top', 'bottom']
+export const isLightPosition = (v: unknown): v is LightPosition => typeof v === 'string' && POSITIONS.includes(v)
 
 const DEFAULT_PRESETS: Preset[] = [
   {
@@ -52,7 +57,8 @@ export class LumosStore {
   private legacyFilePath: string
   private data: LumosStoreData
   private lightManager: LightManager | null = null
-  private schedulerInterval: NodeJS.Timeout | null = null
+  private schedulerTimer: NodeJS.Timeout | null = null
+  private schedulerStopped = false
   private lastTriggeredMinute: string = ''
   private lastStateSaveTimer: NodeJS.Timeout | null = null
   private onBroadcast?: () => void
@@ -103,6 +109,12 @@ export class LumosStore {
         }
       } catch (err) {
         console.error('[Lumos Store] Error reading store from disk:', err)
+        // Keep the unreadable file so it can be recovered, instead of letting the next save overwrite it
+        try {
+          copyFileSync(targetPath, `${targetPath}.corrupt`)
+        } catch {
+          /* nothing more to try */
+        }
       }
     }
 
@@ -119,10 +131,13 @@ export class LumosStore {
     }
   }
 
-  public save(): void {
+  /** Writes the store. The window and other computers are told unless only last states changed, which they do not use. */
+  public save(broadcast = true): void {
     try {
-      writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), 'utf-8')
-      if (this.onBroadcast) {
+      writeFileAtomic(this.filePath, JSON.stringify(this.data, null, 2))
+      // Schedules, timers, or alarms may have changed
+      if (broadcast) this.armScheduler()
+      if (broadcast && this.onBroadcast) {
         this.onBroadcast()
       }
     } catch (err) {
@@ -168,6 +183,7 @@ export class LumosStore {
         if (meta.room) light.room = meta.room
         if (typeof meta.order === 'number') light.order = meta.order
         if (typeof meta.hidden === 'boolean') light.hidden = meta.hidden
+        light.position = isLightPosition(meta.position) ? meta.position : undefined
       }
     }
   }
@@ -186,6 +202,8 @@ export class LumosStore {
 
   public recordLastState(deviceId: string, state: DeviceMetadata['lastState']): void {
     const existing = this.data.deviceMeta[deviceId] || {}
+    // Bulbs repeat their state in periodic reports; only a real change needs saving
+    if (sameLastState(existing.lastState, state)) return
     this.data.deviceMeta[deviceId] = {
       ...existing,
       lastState: state
@@ -194,7 +212,7 @@ export class LumosStore {
     if (this.lastStateSaveTimer) clearTimeout(this.lastStateSaveTimer)
     this.lastStateSaveTimer = setTimeout(() => {
       this.lastStateSaveTimer = null
-      this.save()
+      this.save(false)
     }, 1000)
   }
 
@@ -367,11 +385,50 @@ export class LumosStore {
   }
 
   private startScheduler(): void {
-    if (this.schedulerInterval) clearInterval(this.schedulerInterval)
+    this.schedulerStopped = false
+    this.armScheduler()
+  }
 
-    this.schedulerInterval = setInterval(() => {
+  /**
+   * Wakes only when something is scheduled: every 5 seconds while a sleep timer or a
+   * sunrise ramp is running, otherwise at the start of each minute (schedules have
+   * minute resolution), and not at all when nothing is scheduled. Re-armed on every save.
+   */
+  private armScheduler(): void {
+    if (this.schedulerTimer) clearTimeout(this.schedulerTimer)
+    this.schedulerTimer = null
+    if (this.schedulerStopped) return
+    const delay = this.nextTickDelay(Date.now())
+    if (delay === null) return
+    this.schedulerTimer = setTimeout(() => {
+      this.schedulerTimer = null
       this.tick()
-    }, 5000)
+        .catch((err) => console.error('[Lumos Scheduler] Tick failed:', err))
+        .finally(() => {
+          if (!this.schedulerTimer) this.armScheduler()
+        })
+    }, delay)
+  }
+
+  private nextTickDelay(nowMs: number): number | null {
+    if (this.data.sleepTimer?.active) return 5000
+    const alarm = this.data.sunriseAlarm
+    if (alarm?.enabled && this.isInSunriseRamp(alarm, new Date(nowMs))) return 5000
+    if (alarm?.enabled || this.data.schedules.some((s) => s.enabled)) {
+      // Just after the next minute starts
+      return 60000 - (nowMs % 60000) + 50
+    }
+    return null
+  }
+
+  private isInSunriseRamp(alarm: NonNullable<LumosStoreData['sunriseAlarm']>, now: Date): boolean {
+    if (!alarm.days.includes(now.getDay())) return false
+    const [targetH, targetM] = alarm.time.split(':').map(Number)
+    const target = new Date(now)
+    target.setHours(targetH, targetM, 0, 0)
+    const end = target.getTime()
+    const start = end - alarm.rampDurationMinutes * 60 * 1000
+    return now.getTime() >= start && now.getTime() <= end
   }
 
   private async tick(): Promise<void> {
@@ -460,14 +517,28 @@ export class LumosStore {
     if (this.lastStateSaveTimer) {
       clearTimeout(this.lastStateSaveTimer)
       this.lastStateSaveTimer = null
-      this.save()
+      this.save(false)
     }
-    if (this.schedulerInterval) {
-      clearInterval(this.schedulerInterval)
-      this.schedulerInterval = null
+    this.schedulerStopped = true
+    if (this.schedulerTimer) {
+      clearTimeout(this.schedulerTimer)
+      this.schedulerTimer = null
     }
   }
 }
 
 export const lumosStore = new LumosStore()
 export const lumenStore = lumosStore
+
+function sameLastState(a: DeviceMetadata['lastState'], b: DeviceMetadata['lastState']): boolean {
+  if (!a || !b) return a === b
+  return (
+    a.power === b.power &&
+    a.brightness === b.brightness &&
+    a.colorTemp === b.colorTemp &&
+    a.mode === b.mode &&
+    a.color?.h === b.color?.h &&
+    a.color?.s === b.color?.s &&
+    a.color?.v === b.color?.v
+  )
+}

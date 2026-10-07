@@ -3,8 +3,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from '
 import { join } from 'path'
 import type { Light } from '../devices/Light'
 import { Compositor } from './compositor'
-import { Effect, EffectHost, EffectSnapshot } from './Effect'
-import { FlashGuard, MAX_FLASHES_PER_SECOND } from './safety'
+import { Effect, EffectHost, EffectSnapshot, ManualKind } from './Effect'
+import { FlashGuard, MAX_FLASHES_PER_SECOND, PROTECTED_LIMITS } from './safety'
+import { setBulbProtection } from '../devices/Light'
 import { FlashSpec, runFlash } from './flash'
 import { asObj, bool, int } from './validate'
 
@@ -16,13 +17,16 @@ export interface GlobalEffectSettings {
   reduceIntensity: boolean
   /** Effects that were on when the app closed start again on launch. */
   resumeOnLaunch: boolean
+  /** Caps commands, power changes, and flashes for every light from every source (PROTECTED_LIMITS). */
+  bulbProtection: boolean
 }
 
 export const DEFAULT_GLOBAL_SETTINGS: GlobalEffectSettings = {
   ratePerSecond: 12,
   maxFlashesPerSecond: MAX_FLASHES_PER_SECOND,
   reduceIntensity: false,
-  resumeOnLaunch: true
+  resumeOnLaunch: true,
+  bulbProtection: false
 }
 
 export interface EffectsSnapshot {
@@ -49,7 +53,8 @@ export function sanitizeGlobal(raw: unknown): GlobalEffectSettings {
     ratePerSecond: int(o.ratePerSecond, d.ratePerSecond, 2, 20),
     maxFlashesPerSecond: int(o.maxFlashesPerSecond, d.maxFlashesPerSecond, 1, MAX_FLASHES_PER_SECOND),
     reduceIntensity: bool(o.reduceIntensity, d.reduceIntensity),
-    resumeOnLaunch: bool(o.resumeOnLaunch, d.resumeOnLaunch)
+    resumeOnLaunch: bool(o.resumeOnLaunch, d.resumeOnLaunch),
+    bulbProtection: bool(o.bulbProtection, d.bulbProtection)
   }
 }
 
@@ -91,7 +96,11 @@ export class EffectManager extends EventEmitter {
       isDemo: () => this.lights.getIsDemoMode(),
       changed: () => this.scheduleChanged(),
       persist: () => this.schedulePersist(),
-      dataDir: effectsDir
+      dataDir: effectsDir,
+      claimedByOther: (selfId, lightId) => {
+        for (const e of this.effects.values()) if (e.id !== selfId && e.claims(lightId)) return true
+        return false
+      }
     }
     this.load()
     this.applyGlobal()
@@ -230,11 +239,11 @@ export class EffectManager extends EventEmitter {
    * Called before a light is changed by hand. Ambient effects let go of the
    * light and a notice is emitted so the UI can offer a one-click resume.
    */
-  public markManual(lightIds: string[]): void {
+  public markManual(lightIds: string[], kind: ManualKind = 'state'): void {
     const notices = new Map<string, PausedNotice>()
     for (const id of lightIds) {
       for (const effect of this.effects.values()) {
-        const outcome = effect.onManualChange(id)
+        const outcome = effect.onManualChange(id, kind)
         if (outcome === 'paused') {
           const light = this.lights.getAllLights().find((l) => l.id === id)
           const n = notices.get(effect.id) || {
@@ -277,9 +286,15 @@ export class EffectManager extends EventEmitter {
   // --- Persistence ---
 
   private applyGlobal(): void {
-    this.compositor.setRatePerSecond(this.global.ratePerSecond)
+    const protect = this.global.bulbProtection
+    setBulbProtection(protect)
+    this.compositor.setRatePerSecond(
+      protect ? Math.min(this.global.ratePerSecond, PROTECTED_LIMITS.commandsPerSecond) : this.global.ratePerSecond
+    )
     this.compositor.getFlashGuard().configure({
-      maxPerSecond: this.global.maxFlashesPerSecond,
+      maxPerSecond: protect
+        ? Math.min(this.global.maxFlashesPerSecond, PROTECTED_LIMITS.flashesPerSecond)
+        : this.global.maxFlashesPerSecond,
       reduceIntensity: this.global.reduceIntensity
     })
   }

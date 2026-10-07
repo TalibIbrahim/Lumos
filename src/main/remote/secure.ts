@@ -75,10 +75,12 @@ export class SecureChannel {
       const decipher = createDecipheriv('aes-256-gcm', this.key, iv)
       decipher.setAuthTag(tag)
       const plain = Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8')
-      const parsed = JSON.parse(plain) as { s?: unknown; m?: unknown }
+      const parsed = JSON.parse(plain) as { s?: unknown; m?: unknown } | null
+      if (parsed === null || typeof parsed !== 'object') return null
       if (typeof parsed.s !== 'number' || parsed.s <= this.lastReceivedSeq) return null
       this.lastReceivedSeq = parsed.s
-      return parsed.m ?? null
+      // Messages are objects; anything else is not something either side sends
+      return parsed.m !== null && typeof parsed.m === 'object' && !Array.isArray(parsed.m) ? parsed.m : null
     } catch {
       return null
     }

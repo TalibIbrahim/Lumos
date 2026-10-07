@@ -120,6 +120,10 @@ app.whenReady().then(async () => {
     isStartHidden = false
   }
 
+  // What each light last looked like when sent to the window. A bulb confirms a command by
+  // reporting the state it was just sent, so most reports repeat it; those are not sent again.
+  const lastPushed = new Map<string, string>()
+
   // Initialize Light Manager with broadcaster
   lightManager = new LightManager((state: NormalizedLightState) => {
     lumosStore.recordLastState(state.id, {
@@ -129,6 +133,10 @@ app.whenReady().then(async () => {
       color: state.color,
       mode: state.mode
     })
+    // lastSeen changes with every report and is not shown
+    const shown = JSON.stringify({ ...state, lastSeen: undefined })
+    if (lastPushed.get(state.id) === shown) return
+    lastPushed.set(state.id, shown)
     // While this computer controls another computer's lights, the window shows those instead
     if (mainWindow && !mainWindow.isDestroyed() && !isForwarding()) {
       mainWindow.webContents.send('light-update', state)
@@ -141,10 +149,13 @@ app.whenReady().then(async () => {
   registerEffects(effectManager)
   energyTracker = new EnergyTracker(lightManager, app.getPath('userData'))
   lightManager.onLightsLoaded = () => {
+    lastPushed.clear()
+    // Saved names, rooms, hidden state, and positions belong on the new light objects
+    lumosStore.applyMetadataToLights()
     effectManager?.attachLights()
     energyTracker?.attach()
   }
-  lightManager.onManualChange = (ids) => effectManager?.markManual(ids)
+  lightManager.onManualChange = (ids, kind) => effectManager?.markManual(ids, kind)
   webhookServer.setEffectManager(effectManager)
   homeKitManager.setEffectManager(effectManager)
 

@@ -114,3 +114,40 @@ describe('Music analysis: beat detection on synthetic signals', () => {
     expect(high).toBeGreaterThanOrEqual(low)
   })
 })
+
+describe('Music analysis: drop detection', () => {
+  const hat = (t: number): number => {
+    const local = t % 0.25
+    return 0.15 * Math.exp(-local / 0.02) * Math.sin(2 * Math.PI * 8000 * local)
+  }
+  const drops = (signal: (t: number) => number, seconds: number): number[] => {
+    const analyzer = new MusicAnalyzer({ sampleRate: SR, frameSize: N })
+    const found: number[] = []
+    for (let f = 0; f < Math.floor((seconds * SR) / N); f++) {
+      const buf = new Float32Array(N)
+      for (let i = 0; i < N; i++) buf[i] = signal((f * N + i) / SR)
+      const t = ((f * N) / SR) * 1000
+      if (analyzer.process(buf, t).drop) found.push(t)
+    }
+    return found
+  }
+
+  it('flags the beat where the bass comes back after a breakdown, once', () => {
+    const k = kick(0.5)
+    // Kicks with hats, then six seconds of hats only, then the kicks come back
+    const signal = (t: number): number => (t < 6 || t >= 12 ? k(t) : 0) + hat(t)
+    const found = drops(signal, 20)
+    expect(found).toHaveLength(1)
+    expect(Math.abs(found[0] - 12000)).toBeLessThan(600)
+  })
+
+  it('finds no drop in a steady track', () => {
+    const k = kick(0.5)
+    expect(drops((t) => k(t) + hat(t), 20)).toHaveLength(0)
+  })
+
+  it('does not treat a track starting after silence as a drop', () => {
+    const k = kick(0.5)
+    expect(drops((t) => (t < 4 ? 0 : k(t) + hat(t)), 12)).toHaveLength(0)
+  })
+})

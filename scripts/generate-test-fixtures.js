@@ -34,6 +34,30 @@ const fixtures = {
     <rect x="110" y="110" width="80" height="80" fill="#e01020"/></svg>`
 }
 
-Promise.all(
-  Object.entries(fixtures).map(([name, svg]) => sharp(Buffer.from(svg)).png().toFile(join(out, name)))
-).then(() => console.log(`Wrote ${Object.keys(fixtures).length} fixtures to ${out}`))
+// Screen frames for Screen Sync, at the 160 by 90 size the analysis uses
+const screenOut = join(__dirname, '..', 'src', '__tests__', 'fixtures', 'screen')
+mkdirSync(screenOut, { recursive: true })
+const frame = (body) => `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="90">${body}</svg>`
+const screens = {
+  // A neutral, dim street on the left; a green explosion fills the right side
+  'explosion-right-green.png': frame(`
+    <rect width="160" height="90" fill="#4a4743"/>
+    <defs><radialGradient id="g" cx="0.85" cy="0.5" r="0.45">
+      <stop offset="0" stop-color="#d8ffb0"/><stop offset="0.35" stop-color="#35e01a"/><stop offset="1" stop-color="#4a4743"/></radialGradient></defs>
+    <rect x="80" width="80" height="90" fill="url(#g)"/>`),
+  // A 2.39:1 film in a 16:9 frame: 11 px bars top and bottom around a warm orange scene
+  'letterbox-239.png': frame(`
+    <rect width="160" height="90" fill="#000000"/>
+    <rect y="11" width="160" height="68" fill="#e0791f"/>
+    <rect x="60" y="30" width="40" height="30" fill="#7a2e0a"/>`),
+  // Saturated blue with a magenta sign
+  'colorful.png': frame(`<rect width="160" height="90" fill="#1d3fd6"/><rect x="100" y="20" width="40" height="25" fill="#e01ab8"/>`),
+  'gray.png': frame(`<rect width="160" height="90" fill="#808080"/><rect x="30" y="30" width="50" height="30" fill="#9a9a9a"/>`),
+  'black.png': frame(`<rect width="160" height="90" fill="#000000"/>`),
+  'white.png': frame(`<rect width="160" height="90" fill="#ffffff"/>`)
+}
+
+Promise.all([
+  ...Object.entries(fixtures).map(([name, svg]) => sharp(Buffer.from(svg)).png().toFile(join(out, name))),
+  ...Object.entries(screens).map(([name, svg]) => sharp(Buffer.from(svg)).png().toFile(join(screenOut, name)))
+]).then(() => console.log(`Wrote ${Object.keys(fixtures).length + Object.keys(screens).length} fixtures`))

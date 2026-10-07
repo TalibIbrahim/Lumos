@@ -1,5 +1,6 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react'
 import { motion } from 'framer-motion'
+import { createThrottle, Throttle } from '../lib/throttle'
 import {
   Lightbulb,
   SlidersHorizontal,
@@ -58,8 +59,18 @@ const LightTileComponent: React.FC<LightTileProps> = ({
   const hasMovedRef = useRef(false)
   const startTimeRef = useRef(0)
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const throttleTimerRef = useRef<NodeJS.Timeout | null>(null)
   const tileRef = useRef<HTMLDivElement>(null)
+  // Brightness reaches the bulb at most every 50 ms while dragging, and the last value always arrives
+  const onBrightnessRef = useRef(onBrightnessChange)
+  onBrightnessRef.current = onBrightnessChange
+  const idRef = useRef(id)
+  idRef.current = id
+  // The latest dragged value; state can lag the last pointer move when the pointer is released
+  const dragBriRef = useRef(brightness)
+  const throttleRef = useRef<Throttle<[number]> | null>(null)
+  if (!throttleRef.current) {
+    throttleRef.current = createThrottle(50, (value: number) => onBrightnessRef.current(idRef.current, value))
+  }
 
   // Keep local brightness in sync with external updates when not dragging
   useEffect(() => {
@@ -72,7 +83,7 @@ const LightTileComponent: React.FC<LightTileProps> = ({
   useEffect(() => {
     return () => {
       if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current)
-      if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current)
+      throttleRef.current?.cancel()
     }
   }, [])
 
@@ -144,12 +155,8 @@ const LightTileComponent: React.FC<LightTileProps> = ({
       const deltaPercent = (deltaY / 120) * 100
       const nextBri = Math.max(1, Math.min(100, Math.round(startBriRef.current + deltaPercent)))
       setLocalBri(nextBri)
-
-      // Throttle IPC network commit to 50ms intervals for responsive hardware feedback
-      if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current)
-      throttleTimerRef.current = setTimeout(() => {
-        onBrightnessChange(id, nextBri)
-      }, 50)
+      dragBriRef.current = nextBri
+      throttleRef.current?.call(nextBri)
     }
   }
 
@@ -170,8 +177,8 @@ const LightTileComponent: React.FC<LightTileProps> = ({
       } catch {
         // Safe fallback
       }
-      if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current)
-      onBrightnessChange(id, localBri)
+      throttleRef.current?.cancel()
+      onBrightnessChange(id, dragBriRef.current)
     } else {
       // Clean tap interaction: toggle power state
       const duration = Date.now() - startTimeRef.current
@@ -185,7 +192,7 @@ const LightTileComponent: React.FC<LightTileProps> = ({
     isPointerDownRef.current = false
     setIsDragging(false)
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current)
-    if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current)
+    throttleRef.current?.cancel()
   }
 
   // Keyboard navigation & accessibility
@@ -324,7 +331,7 @@ const LightTileComponent: React.FC<LightTileProps> = ({
                     onOpenDetail(light)
                   }}
                 >
-                  <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-400 group-hover:text-white" />
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-white" />
                 </GlassButton>
               ) : (
                 <span className="text-[10px] font-medium text-rose-400/90 bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20">

@@ -92,6 +92,13 @@ export class GamesEffect extends Effect<GamesSettings> {
   private rl = new RlClient()
   private tracker = new RlMatchTracker('')
   private rlInMatch = false
+  /** What the Stats API has sent this session, shown in the settings to help setup. */
+  private rlDiag: {
+    messages: number
+    lastEvent: string
+    lastEventAt: number
+    lastGoal: { outcome: 'ours' | 'theirs' | 'unknown'; at: number } | null
+  } = { messages: 0, lastEvent: '', lastEventAt: 0, lastGoal: null }
   private lastFlashAt = 0
   private cs2: Cs2Listener | null = null
   private cs2Status: GameStatus = 'off'
@@ -260,7 +267,9 @@ export class GamesEffect extends Effect<GamesSettings> {
 
   private onRlEvent(e: RlEvent): void {
     if (!this.running) return
+    const teamBefore = this.tracker.getMyTeam()
     this.tracker.update(e)
+    this.recordRlEvent(e, teamBefore)
     const rl = this.settings.rocketLeague
     if (e.type === 'state' && !this.rlInMatch) {
       this.rlInMatch = true
@@ -273,6 +282,8 @@ export class GamesEffect extends Effect<GamesSettings> {
       const teamColor = rl.useTeamColor ? hexToHueSat(this.tracker.teamColor(this.tracker.getMyTeam())) : null
       const color =
         outcome === 'ours' ? (teamColor ?? rl.ourGoalColor) : outcome === 'theirs' ? rl.theirGoalColor : rl.neutralColor
+      this.rlDiag.lastGoal = { outcome, at: this.clock() }
+      this.host.changed()
       this.flash(outcome === 'ours' ? 'Your goal' : outcome === 'theirs' ? 'Opponent goal' : 'Goal', color, rl.flashCount)
     } else if (e.type === 'matchEnded' && rl.matchEnd) {
       const outcome = this.tracker.matchOutcome(e.winnerTeamNum)
@@ -303,6 +314,25 @@ export class GamesEffect extends Effect<GamesSettings> {
       includeOff: this.settings.flashLightsThatAreOff
     })
     return true
+  }
+
+  private recordRlEvent(e: RlEvent, teamBefore: number | null): void {
+    const names: Record<string, string> = {
+      state: 'UpdateState',
+      goal: 'GoalScored',
+      matchEnded: 'MatchEnded',
+      matchStart: 'MatchInitialized',
+      matchDestroyed: 'MatchDestroyed'
+    }
+    const d = this.rlDiag
+    const first = d.messages === 0
+    d.messages++
+    d.lastEventAt = this.clock()
+    const name = e.type === 'other' ? e.name : names[e.type]
+    // Updates arrive many times a second; only events worth showing refresh the settings
+    const notable = e.type !== 'state' || first || this.tracker.getMyTeam() !== teamBefore
+    if (e.type !== 'state' || !d.lastEvent) d.lastEvent = name
+    if (notable) this.host.changed()
   }
 
   // --- Status ---
@@ -336,7 +366,16 @@ export class GamesEffect extends Effect<GamesSettings> {
 
   protected info(): Record<string, unknown> {
     return {
-      rocketLeague: { status: this.rlStatus(), team: this.tracker.getMyTeam() },
+      rocketLeague: {
+        status: this.rlStatus(),
+        team: this.tracker.getMyTeam(),
+        teamName: this.tracker.teamName(this.tracker.getMyTeam()),
+        teamSource: this.tracker.getSource(),
+        messages: this.rlDiag.messages,
+        lastEvent: this.rlDiag.lastEvent,
+        lastEventAt: this.rlDiag.lastEventAt,
+        lastGoal: this.rlDiag.lastGoal
+      },
       cs2: { status: this.running && this.settings.cs2.enabled ? this.cs2Status : 'off', error: this.cs2Error },
       league: { status: this.leagueStatus() },
       health: this.health.isActive()
@@ -439,12 +478,16 @@ export class GamesEffect extends Effect<GamesSettings> {
       this.tracker.setPlayerName('Demo Player')
       this.tracker.update({
         type: 'state',
-        players: [{ name: 'Demo Player', teamNum: 0 }],
+        players: [
+          { name: 'Demo Player', teamNum: 0, detailed: true },
+          { name: 'Opponent', teamNum: 1, detailed: false }
+        ],
         teams: [
           { teamNum: 0, name: 'Blue', colorPrimary: '1873FF' },
           { teamNum: 1, name: 'Orange', colorPrimary: 'FF8A15' }
         ],
-        replay: false
+        replay: false,
+        target: null
       })
       this.lastFlashAt = 0
       this.onRlEvent({ type: 'goal', scorer: { name: 'x', teamNum: event === 'goal-ours' ? 0 : 1 } })

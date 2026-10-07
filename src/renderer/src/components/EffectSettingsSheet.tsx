@@ -15,6 +15,7 @@ import {
   swatchCss
 } from './ui/SettingsControls'
 import { EFFECT_ICONS } from '../lib/effectIcons'
+import { ScreenSyncSettings } from './ScreenSyncSettings'
 import { EffectSnapshotData, NormalizedLightState } from '../types'
 
 type Settings = EffectSnapshotData['settings']
@@ -94,6 +95,7 @@ export const EffectSettingsSheet: React.FC<EffectSettingsSheetProps> = ({ effect
             </div>
           )}
 
+          {effect.id === 'screen' && <ScreenSyncSettings s={s} patch={patch} effect={effect} lights={lights} isDemoMode={isDemoMode} />}
           {effect.id === 'music' && <MusicSettings s={s} patch={patch} effect={effect} />}
           {effect.id === 'album' && <AlbumSettings s={s} patch={patch} effect={effect} isDemoMode={isDemoMode} />}
           {effect.id === 'away' && <AwaySettings s={s} patch={patch} effect={effect} isDemoMode={isDemoMode} />}
@@ -170,6 +172,26 @@ const MusicSettings: React.FC<SectionProps> = ({ s, patch, effect }) => {
   return (
     <>
       <PhotosensitivityNote />
+      <Group
+        title="Style"
+        footer={
+          s.style === 'party'
+            ? 'Lights snap to each beat, step to the next colour, and go full white for a moment when the beat drops. Every beat after a drop hits full brightness for a while. The flash limit still applies.'
+            : 'Lights pulse gently with the beat while the colours drift slowly.'
+        }
+      >
+        <Row label="Style">
+          <Segmented
+            ariaLabel="Style"
+            value={s.style}
+            options={[
+              { value: 'smooth', label: 'Smooth' },
+              { value: 'party', label: 'Party' }
+            ]}
+            onChange={(v) => patch({ style: v })}
+          />
+        </Row>
+      </Group>
       <Group title="Listening" footer="Sound is analysed on this computer as it plays. Nothing is recorded, saved, or sent anywhere.">
         <Row label="Level" hint={effect.status === 'off' ? 'Turn the effect on to see the live level.' : level?.tempo ? `About ${level.tempo} beats per minute` : 'Play some music to tune sensitivity.'} stacked>
           <div className="flex items-center gap-3" aria-hidden="true">
@@ -182,8 +204,12 @@ const MusicSettings: React.FC<SectionProps> = ({ s, patch, effect }) => {
         <Row label="Sensitivity" hint="Higher catches softer beats." stacked>
           <RangeControl ariaLabel="Sensitivity" value={s.sensitivity} min={0} max={100} onChange={(v) => patch({ sensitivity: v })} format={(v) => `${v}%`} />
         </Row>
-        <Row label="Pause after silence" stacked>
-          <RangeControl ariaLabel="Pause after silence" value={s.silenceSeconds} min={2} max={60} onChange={(v) => patch({ silenceSeconds: v })} format={(v) => `${v} s`} />
+        <Row
+          label="Pause when the music stops"
+          hint="After this long without sound, your lights go back to how they were. Music picks up again as soon as something plays."
+          stacked
+        >
+          <RangeControl ariaLabel="Pause when the music stops" value={s.silenceSeconds} min={2} max={60} onChange={(v) => patch({ silenceSeconds: v })} format={(v) => `${v} s`} />
         </Row>
       </Group>
 
@@ -225,16 +251,25 @@ const MusicSettings: React.FC<SectionProps> = ({ s, patch, effect }) => {
               />
             </Row>
           ))}
-        <Row label="Colour drift" hint="How quickly the colours change. Livelier tracks change faster." stacked>
-          <RangeControl ariaLabel="Colour drift" value={s.driftSpeed} min={0} max={100} onChange={(v) => patch({ driftSpeed: v })} format={(v) => `${v}%`} />
-        </Row>
-        <Row label="Spread colours across lights" hint="Colours move from light to light like a wave.">
+        {s.style !== 'party' && (
+          <Row label="Colour drift" hint="How quickly the colours change. Livelier tracks change faster." stacked>
+            <RangeControl ariaLabel="Colour drift" value={s.driftSpeed} min={0} max={100} onChange={(v) => patch({ driftSpeed: v })} format={(v) => `${v}%`} />
+          </Row>
+        )}
+        <Row
+          label="Spread colours across lights"
+          hint={s.style === 'party' ? 'Neighbouring lights show different colours from the set.' : 'Colours move from light to light like a wave.'}
+        >
           <ToggleButton on={s.wave} onChange={(on) => patch({ wave: on })} ariaLabel="Spread colours across lights" />
         </Row>
       </Group>
 
       <Group title="Pulse" footer="When Album color is also on, the album colour is used and Music adds the pulses.">
-        <Row label="Pulse strength" hint="How far brightness moves on each beat." stacked>
+        <Row
+          label="Pulse strength"
+          hint={s.style === 'party' ? 'How dark the lights go between beats.' : 'How far brightness moves on each beat.'}
+          stacked
+        >
           <RangeControl ariaLabel="Pulse strength" value={s.pulseDepth} min={0} max={100} onChange={(v) => patch({ pulseDepth: v })} format={(v) => `${v}%`} />
         </Row>
         <Row label="Most beats per second">
@@ -377,6 +412,58 @@ const AwaySettings: React.FC<SectionProps> = ({ s, patch, effect, isDemoMode }) 
 
 // --- Games ---
 
+function ago(at: number): string {
+  const s = Math.max(0, Math.round((Date.now() - at) / 1000))
+  if (s < 60) return s <= 5 ? 'just now' : `${s} s ago`
+  const m = Math.round(s / 60)
+  return m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`
+}
+
+const TEAM_SOURCE: Record<string, string> = {
+  name: 'from your in-game name',
+  'team-data': "from your team's car details",
+  camera: 'from the player the camera follows'
+}
+
+/** What Lumos has received from Rocket League, to check setup and team detection. */
+const RocketLeagueDiagnostics: React.FC<{ info: any; running: boolean }> = ({ info, running }) => {
+  if (!running || !info) return null
+  const messages: number = info.messages ?? 0
+  if (messages === 0) {
+    return (
+      <Row
+        label="Nothing received from Rocket League yet"
+        hint={
+          info.status === 'connected' || info.status === 'in-match'
+            ? 'Connected, waiting for the first update.'
+            : 'If the game is running, its Stats API is probably off. Choose Turn on above, then restart Rocket League.'
+        }
+      />
+    )
+  }
+  const goal = info.lastGoal as { outcome: string; at: number } | null
+  const team =
+    info.team === null || info.team === undefined
+      ? 'Not worked out yet. It usually is within a few seconds of kickoff.'
+      : `${info.teamName ?? 'Team ' + info.team}, ${TEAM_SOURCE[info.teamSource] ?? 'detected'}`
+  return (
+    <>
+      <Row label="Your team" hint={team} />
+      <Row
+        label="Receiving from the game"
+        hint={[
+          `${messages} updates so far; last ${info.lastEvent || 'update'} ${ago(info.lastEventAt)}.`,
+          goal
+            ? `Last goal ${ago(goal.at)}: ${goal.outcome === 'ours' ? 'your team' : goal.outcome === 'theirs' ? 'the other team' : 'team unknown'}.`
+            : ''
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      />
+    </>
+  )
+}
+
 interface RlInstall {
   source: string
   path: string
@@ -450,7 +537,12 @@ const GamesSettings: React.FC<SectionProps> = ({ s, patch, effect, isDemoMode })
         <Row label="Flash for goals">
           <ToggleButton on={rl.enabled} onChange={(on) => setRl({ enabled: on })} ariaLabel="Rocket League goal flash" />
         </Row>
-        <Row label="Your in-game name" hint="Used to tell your goals from your opponents'. Stored only on this computer." stacked>
+        <RocketLeagueDiagnostics info={effect.info.rocketLeague} running={effect.status !== 'off' && rl.enabled} />
+        <Row
+          label="Your in-game name (optional)"
+          hint="Lumos works out your team on its own. Enter your name only if it gets your team wrong; clan tags and capitals do not matter. Stored only on this computer."
+          stacked
+        >
           <input
             type="text"
             value={name}

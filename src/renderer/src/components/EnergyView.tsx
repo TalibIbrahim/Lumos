@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Download, RotateCcw, Info, LightbulbOff, Gauge } from 'lucide-react'
 import { GlassSurface } from './ui/GlassSurface'
 import { GlassButton } from './ui/GlassButton'
-import { Group, Row, Segmented } from './ui/SettingsControls'
+import { Group, Row, Segmented, ToggleButton } from './ui/SettingsControls'
 import { EnergyRangeName, EnergyReportData, NormalizedLightState } from '../types'
 
 /** Bar colour validated for contrast and lightness on the dark surface; hover uses the app accent. */
@@ -221,11 +221,45 @@ export const EnergyView: React.FC<EnergyViewProps> = ({ lights }) => {
   }
 
   const hasData = report.totalKwh > 0
+  const setTracking = async (on: boolean): Promise<void> => {
+    await api?.setEnergyEnabled(on)
+    await load()
+  }
+  const trackingGroup = (
+    <Group
+      title="Tracking"
+      footer={
+        report.enabled
+          ? 'Lumos adds up the estimated use of each light while it runs.'
+          : 'Off by default. Turn it on to start adding up estimated use. Nothing is recorded while it is off, and any history already saved is kept.'
+      }
+    >
+      <Row label="Track energy use" hint="Estimates only. Lights do not report their power.">
+        <ToggleButton on={report.enabled} onChange={(on) => void setTracking(on)} ariaLabel="Track energy use" />
+      </Row>
+    </Group>
+  )
+
+  if (!report.enabled && !hasData) {
+    return (
+      <div className="flex flex-col gap-6">
+        <div className="p-10 text-center rounded-2xl bg-zinc-950/30 border border-white/[0.06] flex flex-col items-center gap-3">
+          <Gauge className="w-10 h-10 text-zinc-500" />
+          <p className="text-base font-semibold text-zinc-200">Energy tracking is off</p>
+          <p className="text-xs text-zinc-400 max-w-sm leading-relaxed">
+            Turn it on to see an estimate of how much power your lights use and what it costs.
+          </p>
+        </div>
+        {trackingGroup}
+      </div>
+    )
+  }
   const currentWatts = report.lights.reduce((s, l) => s + l.watts, 0)
   const rangeLabel = RANGES.find((r) => r.value === report.range)?.label.toLowerCase()
 
   return (
     <div className="flex flex-col gap-6">
+      {trackingGroup}
       <div className="flex items-start gap-2.5 px-4 py-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] text-[11px] text-zinc-400 leading-relaxed">
         <Info className="w-4 h-4 text-zinc-500 flex-shrink-0 mt-px" />
         These are estimates. Your lights do not report their power use, so Lumos works it out from each light's rated

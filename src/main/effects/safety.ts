@@ -3,6 +3,20 @@ import { LightOutput, luminance, hueDistance, clamp } from './output'
 /** Hard ceiling for the flash-rate cap. Users can lower it but never raise it. */
 export const MAX_FLASHES_PER_SECOND = 3
 
+/**
+ * Bulb protection: limits that hold for every light, whatever sends the command (the window,
+ * Apple Home, the webhook, the tray, effects, or another computer). Commands in between are
+ * merged so the light still ends on the latest value.
+ */
+export const PROTECTED_LIMITS = {
+  /** Most writes to one light per second. */
+  commandsPerSecond: 2,
+  /** Most flashes per second on any light. */
+  flashesPerSecond: 1,
+  /** Shortest time between two power changes on one light. */
+  powerChangeIntervalMs: 2000
+} as const
+
 /** A brightness rise of at least this many points within one frame counts as a flash. */
 export const FLASH_RISE_THRESHOLD = 25
 

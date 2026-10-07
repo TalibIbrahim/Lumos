@@ -30,7 +30,15 @@ export interface EffectHost {
   persist(): void
   /** Directory under the user data folder for effect-owned files. */
   dataDir: string
+  /**
+   * True when another effect drives this light exclusively (Screen Sync), so
+   * an ambient effect should leave it alone.
+   */
+  claimedByOther(selfId: string, lightId: string): boolean
 }
+
+/** A plain on or off ('power'), or a change of colour or brightness ('state'). */
+export type ManualKind = 'power' | 'state'
 
 /** What happened to a light when the user changed it by hand. */
 export type ManualOutcome = 'paused' | 'released' | null
@@ -155,7 +163,9 @@ export abstract class Effect<S extends EffectSettingsBase = EffectSettingsBase> 
     return this.host.getLights().filter((l) => this.isTarget(l.id))
   }
 
-  public onManualChange(lightId: string): ManualOutcome {
+  public onManualChange(lightId: string, kind: ManualKind = 'state'): ManualOutcome {
+    // Switching a light on or off is not a colour choice, so ambient effects keep going
+    if (kind === 'power') return null
     if (!this.ambient || !this.isTarget(lightId) || this.status !== 'active') return null
     this.paused.add(lightId)
     this.host.changed()
@@ -173,6 +183,12 @@ export abstract class Effect<S extends EffectSettingsBase = EffectSettingsBase> 
     this.paused.clear()
     this.host.compositor.invalidate(ids, 600)
     this.host.changed()
+  }
+
+  /** Whether this effect currently drives the light exclusively. Only Screen Sync does. */
+  public claims(lightId: string): boolean {
+    void lightId
+    return false
   }
 
   /** Called after the set of lights is reloaded. */

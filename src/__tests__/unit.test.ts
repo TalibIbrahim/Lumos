@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { Light } from '../main/devices/Light'
+import { Light, setBulbProtection } from '../main/devices/Light'
 import { TinyTuyaDevice } from '../main/types'
 import { lumosColorTempToMireds, miredsToLumosColorTemp } from '../main/homekit'
 import { cctToRgb, hsvToRgb } from '../renderer/src/lib/color'
@@ -189,5 +189,62 @@ describe('Unit Tests: ARP Resolution & Dynamic IP Recovery', () => {
 
     expect(light.ip).toBe('192.0.2.200')
     arpSpy.mockRestore()
+  })
+})
+
+describe('Bulb protection', () => {
+  const device: TinyTuyaDevice = { id: 'protect-device', name: 'Protected Bulb', key: 'abcdef1234567890', ip: '192.0.2.98', version: '3.3' }
+
+  it('limits every light to 2 writes per second and 1 power change every 2 seconds, ending on the latest values', async () => {
+    vi.useFakeTimers()
+    setBulbProtection(true)
+    try {
+      const light = new Light(device)
+      light.isConnected = true
+      const sent: Array<{ at: number; data: Record<string, unknown> }> = []
+      // @ts-expect-error mock tuya client
+      light['tuya'] = { set: vi.fn(async (o: { data: Record<string, unknown> }) => { sent.push({ at: Date.now(), data: o.data }) }) }
+      const t0 = Date.now()
+      // A drag: 30 brightness changes over 600 ms, with a power toggle in the middle
+      for (let i = 1; i <= 30; i++) {
+        void light.setBrightness(i * 3)
+        if (i === 10) void light.setPower(false)
+        if (i === 12) void light.setPower(true)
+        await vi.advanceTimersByTimeAsync(20)
+      }
+      await vi.advanceTimersByTimeAsync(5000)
+      for (let i = 1; i < sent.length; i++) expect(sent[i].at - sent[i - 1].at).toBeGreaterThanOrEqual(500)
+      // Power changes (not repeats of the same state) are at least 2 s apart
+      const changes: number[] = []
+      let prev: unknown = undefined
+      for (const w of sent) {
+        const k = '20' in w.data ? '20' : '1' in w.data ? '1' : null
+        if (k && w.data[k] !== prev) {
+          if (prev !== undefined) changes.push(w.at)
+          prev = w.data[k]
+        }
+      }
+      for (let i = 1; i < changes.length; i++) expect(changes[i] - changes[i - 1]).toBeGreaterThanOrEqual(2000)
+      expect(sent.length).toBeLessThanOrEqual(5)
+      // The last brightness sent is the latest one asked for
+      const last = [...sent].reverse().find((w) => Object.keys(w.data).some((k) => k !== '20' && k !== '1'))
+      expect(last).toBeDefined()
+      expect(light.brightness).toBe(90)
+      expect(Date.now() - t0).toBeGreaterThan(0)
+    } finally {
+      setBulbProtection(false)
+      vi.useRealTimers()
+    }
+  })
+
+  it('sends straight away when protection is off', async () => {
+    const light = new Light(device)
+    light.isConnected = true
+    const set = vi.fn(async () => true)
+    // @ts-expect-error mock tuya client
+    light['tuya'] = { set }
+    await light.setBrightness(30)
+    await light.setBrightness(60)
+    expect(set).toHaveBeenCalledTimes(2)
   })
 })

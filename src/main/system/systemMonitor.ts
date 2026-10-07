@@ -25,6 +25,8 @@ export interface SystemState {
   /** Output level peak over the last sample window, 0..1, or -1 if unavailable. */
   peak: number
   fullscreen: boolean
+  /** A Direct3D app is in exclusive full screen, which screen capture often cannot see. */
+  exclusive: boolean
 }
 
 const MAX_LINE = 64 * 1024
@@ -45,7 +47,7 @@ export function parseHelperLine(
   if (o.t === 'sys') {
     return {
       kind: 'sys',
-      sys: { peak: num(o.peak, -1, -1, 1), fullscreen: o.fullscreen === true }
+      sys: { peak: num(o.peak, -1, -1, 1), fullscreen: o.fullscreen === true, exclusive: o.exclusive === true }
     }
   }
   if (o.t === 'media') {
@@ -93,7 +95,7 @@ export class SystemMonitor extends EventEmitter {
   private backoffMs = 1000
   private buffer = ''
   private media: MediaState = { status: 'None', key: null, thumbnail: null }
-  private sys: SystemState = { peak: -1, fullscreen: false }
+  private sys: SystemState = { peak: -1, fullscreen: false, exclusive: false }
   private lastAudibleAt = 0
   private available: boolean | null = null
   private error = ''

@@ -5,7 +5,6 @@ import fs from 'fs'
 import os from 'os'
 import util from 'util'
 import debug from 'debug'
-import QRCode from 'qrcode'
 
 // Enable diagnostic logging for HAP-NodeJS and Ciao
 process.env.DEBUG = process.env.DEBUG || 'HAP-NodeJS*,@homebridge/ciao*'
@@ -39,17 +38,17 @@ function setupDebugLogging(storagePath) {
   }
 }
 
-// Dynamically require hap-nodejs so cryptoPolyfill is active before hap-nodejs initialization
-const hap = require('hap-nodejs')
-const {
-  Bridge,
-  Accessory,
-  Service,
-  Characteristic,
-  HAPStorage,
-  HapStatusError,
-  uuid
-} = hap
+// hap-nodejs is required at run time so cryptoPolyfill is active before it initializes. It takes
+// a noticeable time to load, so it loads when HomeKit starts rather than before the window opens,
+// and not at all on a computer that controls another computer's lights.
+let hap = null
+let Bridge, Accessory, Service, Characteristic, HAPStorage, HapStatusError, uuid
+function loadHap() {
+  if (hap) return hap
+  hap = require('hap-nodejs')
+  ;({ Bridge, Accessory, Service, Characteristic, HAPStorage, HapStatusError, uuid } = hap)
+  return hap
+}
 
 // HAP Constants
 const HAP_SERVICE_COMMUNICATION_FAILURE = -70402
@@ -147,6 +146,7 @@ export class HomeKitManager {
   }
 
   setupStorage() {
+    loadHap()
     if (this.storageInitialized) return
     let userData = ''
     try {
@@ -232,9 +232,10 @@ export class HomeKitManager {
       accessory.getService(Service.Lightbulb) || accessory.addService(Service.Lightbulb, light.name)
 
     // Changes from Apple Home are manual control, so ambient effects step aside
-    const markManual = () => {
+    // 'power' for plain on and off, which does not pause ambient effects
+    const markManual = (kind = 'state') => {
       if (this.lightManager && typeof this.lightManager.markManual === 'function') {
-        this.lightManager.markManual([light.id])
+        this.lightManager.markManual([light.id], kind)
       }
     }
 
@@ -276,7 +277,7 @@ export class HomeKitManager {
           return state.power
         })
         .onSet(async (value) => {
-          markManual()
+          markManual('power')
           const boolVal = Boolean(value)
           if (!boolVal) {
             if (brightnessTimer) {
@@ -490,6 +491,7 @@ export class HomeKitManager {
   }
 
   async publishBridge() {
+    loadHap()
     if (!this.config || !this.lightManager) return
 
     const bridgeUuid = uuid.generate('lumos-bridge-root')
@@ -558,6 +560,7 @@ export class HomeKitManager {
 
     if (setupURI) {
       try {
+        const QRCode = require('qrcode')
         qrCodeDataUrl = await QRCode.toDataURL(setupURI, {
           errorCorrectionLevel: 'M',
           margin: 2,
