@@ -397,11 +397,28 @@ export class GamesEffect extends Effect<GamesSettings> {
           port: this.settings.rocketLeague.port
         })
         const res = await writeGameConfig(install.configPath, next, join(this.host.dataDir, 'backups'))
+        const docsPath = process.platform === 'win32'
+          ? join(process.env.USERPROFILE || '', 'Documents', 'My Games', 'Rocket League', 'TAGame', 'Config', 'TAStatsAPI.ini')
+          : null
+        if (docsPath && existsSync(docsPath)) {
+          const docsCur = readTextIfExists(docsPath) ?? ''
+          const docsNext = applyStatsApiSettings(docsCur, {
+            packetSendRate: RL_PACKET_RATE,
+            port: this.settings.rocketLeague.port
+          })
+          await writeGameConfig(docsPath, docsNext, join(this.host.dataDir, 'backups'))
+        }
         return { ...res, restartRequired: true, installs: this.detectRocketLeague() }
       }
       case 'rl-revert': {
         const install = this.findInstall(str(p.path, '', 1024))
         const result = await revertGameConfig(install.configPath, false)
+        const docsPath = process.platform === 'win32'
+          ? join(process.env.USERPROFILE || '', 'Documents', 'My Games', 'Rocket League', 'TAGame', 'Config', 'TAStatsAPI.ini')
+          : null
+        if (docsPath && existsSync(docsPath)) {
+          await revertGameConfig(docsPath, false)
+        }
         return { result, restartRequired: true, installs: this.detectRocketLeague() }
       }
       case 'cs2-detect':

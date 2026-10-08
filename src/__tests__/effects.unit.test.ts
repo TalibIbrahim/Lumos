@@ -182,6 +182,13 @@ describe('Rocket League: DefaultStatsAPI.ini editing', () => {
     expect(readStatsApiSettings('PacketSendRate=0\nPort=49123').packetSendRate).toBe(0)
     expect(readStatsApiSettings('').packetSendRate).toBeNull()
   })
+
+  it('updates WebPort when present and prefers it over Port', () => {
+    const original = '[TAGame.MatchStatsExporter_TA]\r\nPort=49123\r\nWebPort=49124\r\nPacketSendRate=0\r\n'
+    const next = applyStatsApiSettings(original, { packetSendRate: 10, port: 49124 })
+    expect(next).toBe('[TAGame.MatchStatsExporter_TA]\r\nPort=49123\r\nWebPort=49124\r\nPacketSendRate=10\r\n')
+    expect(readStatsApiSettings(next)).toEqual({ packetSendRate: 10, port: 49124 })
+  })
 })
 
 describe('CS2: Game State Integration payloads', () => {

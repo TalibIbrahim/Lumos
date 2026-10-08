@@ -27,6 +27,10 @@ release/
 .*rules
 .cursor/
 .continue/
+GEMINI.md
+gemini.md
+LUMOS_EFFECTS_PROMPT.md
+lumos_effects_prompt.md
 .github/*
 !.github/workflows/
 !.github/workflows/**

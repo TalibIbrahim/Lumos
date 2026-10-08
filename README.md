@@ -406,7 +406,7 @@ Flashes for goals and a red pulse when your health runs low, using only the game
 
 #### Rocket League goal flash
 
-Uses the official Rocket League Stats API, which the game serves over a local WebSocket (`ws://localhost:49123` by default) once it is switched on.
+Uses the official Rocket League Stats API, which the game serves over a local WebSocket (`ws://localhost:49124` by default) once it is switched on.
 
 1. In **Effects > Games**, Lumos lists the Rocket League installs it found (Steam and Epic). Choose **Turn on** to set `PacketSendRate` in `<install folder>\TAGame\Config\DefaultStatsAPI.ini`. Lumos edits only that setting and the port, backs up the original file next to it (`DefaultStatsAPI.ini.lumos-backup`), and offers **Undo**. If the game folder is protected, Windows asks for permission.
 2. Restart Rocket League. The setting is read only when the game starts.
@@ -414,7 +414,7 @@ Uses the official Rocket League Stats API, which the game serves over a local We
 
 While the effect is on, the settings show whether anything has arrived from the game, which team Lumos thinks you are on and how it knows, and whose the last goal was. If nothing has arrived, the Stats API is off: choose **Turn on** and restart the game.
 
-To do it by hand, set `PacketSendRate` to a value above 0 (Lumos uses 10; the game caps it at 120) and `Port` (default 49123) in that file before launching the game.
+To do it by hand, set `PacketSendRate` to a value above 0 (Lumos uses 10; the game caps it at 120) and `WebPort` (default 49124) in that file before launching the game.
 
 - **Settings:** colour for your goals (or your team's colour), colour for opponent goals, number of flashes, flash length, time between goal flashes, a flash at kickoff, and win or loss colours when the match ends. If Lumos cannot tell whose goal it was (for example while spectating), it uses a neutral colour.
 - **Connection:** Lumos connects when the game is running and reconnects automatically, checking every few seconds, when it launches or closes.

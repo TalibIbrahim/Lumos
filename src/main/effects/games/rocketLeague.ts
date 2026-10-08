@@ -1,7 +1,7 @@
 /**
  * Rocket League Stats API.
  *
- * The game broadcasts JSON over a local WebSocket (default port 49123) once
+ * The game broadcasts JSON over a local WebSocket (default port 49124) once
  * PacketSendRate in <Install Dir>\TAGame\Config\DefaultStatsAPI.ini is above
  * zero. Every message is { "Event": string, "Data": object }. Field names here
  * follow the official Stats API reference.
@@ -10,7 +10,7 @@ import { EventEmitter } from 'events'
 import WebSocket from 'ws'
 import { asObj, isObj, num, str } from '../validate'
 
-export const RL_DEFAULT_PORT = 49123
+export const RL_DEFAULT_PORT = 49124
 /** Used only when the shipped file has no section of its own to add the keys to. */
 export const RL_STATS_SECTION = 'TAGame.MatchStatsExporter_TA'
 /** Packets per second we ask for. Events are sent on the tick they happen regardless. */
@@ -233,11 +233,11 @@ export function readStatsApiSettings(text: string): StatsApiSettings {
     const m = text.match(new RegExp(`^\\s*${key}\\s*=\\s*([0-9.]+)\\s*$`, 'mi'))
     return m ? Number(m[1]) : null
   }
-  return { packetSendRate: get('PacketSendRate'), port: get('Port') }
+  return { packetSendRate: get('PacketSendRate'), port: get('WebPort') ?? get('Port') }
 }
 
 /**
- * Sets PacketSendRate and Port, editing the existing lines in place so the
+ * Sets PacketSendRate and Port (or WebPort when present), editing the existing lines in place so the
  * file's own section and other settings are untouched. Keys that are missing
  * are added under the section that holds the other key, or under the Stats API
  * section when the file has neither.
@@ -245,11 +245,13 @@ export function readStatsApiSettings(text: string): StatsApiSettings {
 export function applyStatsApiSettings(text: string, settings: { packetSendRate: number; port: number }): string {
   const eol = text.includes('\r\n') ? '\r\n' : '\n'
   const lines = text.length > 0 ? text.split(/\r?\n/) : []
+  const hasWebPort = /^\s*WebPort\s*=/mi.test(text)
+  const portKey = hasWebPort ? 'WebPort' : 'Port'
   const values: Record<string, string> = {
     packetsendrate: String(settings.packetSendRate),
-    port: String(Math.round(settings.port))
+    [portKey.toLowerCase()]: String(Math.round(settings.port))
   }
-  const names: Record<string, string> = { packetsendrate: 'PacketSendRate', port: 'Port' }
+  const names: Record<string, string> = { packetsendrate: 'PacketSendRate', [portKey.toLowerCase()]: portKey }
   const seen = new Set<string>()
   let keySectionIndex = -1
   let currentSection = -1
@@ -260,12 +262,14 @@ export function applyStatsApiSettings(text: string, settings: { packetSendRate: 
       currentSection = i
       continue
     }
-    const m = line.match(/^(\s*)(PacketSendRate|Port)(\s*=\s*)(.*)$/i)
+    const m = line.match(/^(\s*)(PacketSendRate|WebPort|Port)(\s*=\s*)(.*)$/i)
     if (m) {
       const key = m[2].toLowerCase()
-      lines[i] = `${m[1]}${m[2]}${m[3]}${values[key]}`
-      seen.add(key)
-      if (keySectionIndex < 0) keySectionIndex = currentSection
+      if (key === 'packetsendrate' || key === portKey.toLowerCase()) {
+        lines[i] = `${m[1]}${m[2]}${m[3]}${values[key]}`
+        seen.add(key)
+        if (keySectionIndex < 0) keySectionIndex = currentSection
+      }
     }
   }
 
