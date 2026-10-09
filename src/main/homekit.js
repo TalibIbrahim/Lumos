@@ -3,6 +3,7 @@ import { app } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
+import net from 'net'
 import util from 'util'
 import debug from 'debug'
 
@@ -47,6 +48,20 @@ function loadHap() {
   if (hap) return hap
   hap = require('hap-nodejs')
   ;({ Bridge, Accessory, Service, Characteristic, HAPStorage, HapStatusError, uuid } = hap)
+
+  // Intercept socket listen errors on HAPServer to prevent unhandled 'error' events crashing Electron
+  if (hap.HAPServer && hap.HAPServer.prototype) {
+    const origListen = hap.HAPServer.prototype.listen
+    hap.HAPServer.prototype.listen = function (port, host) {
+      if (this.httpServer && this.httpServer.tcpServer) {
+        this.httpServer.tcpServer.on('error', (err) => {
+          console.warn('[Lumos HomeKit] HAP TCP server socket error intercepted:', err?.code, err?.message)
+        })
+      }
+      return origListen.call(this, port, host)
+    }
+  }
+
   return hap
 }
 
@@ -57,8 +72,52 @@ const HAP_EVENT_PAIRED = 'paired'
 const HAP_EVENT_UNPAIRED = 'unpaired'
 
 /**
+ * Tests whether a TCP port can be bound on the given host address.
+ */
+export function checkPortAvailable(port, host = '0.0.0.0') {
+  return new Promise((resolve) => {
+    const server = net.createServer()
+    server.once('error', () => {
+      resolve(false)
+    })
+    server.once('listening', () => {
+      server.close(() => resolve(true))
+    })
+    try {
+      server.listen(port, host)
+    } catch {
+      resolve(false)
+    }
+  })
+}
+
+/**
+ * Finds an available, bindable TCP port starting from preferredPort (default 51826).
+ * Scans sequential HAP range (51826-51850), then falls back to OS-assigned ephemeral port.
+ */
+export async function findAvailablePort(preferredPort = 51826, host = '0.0.0.0') {
+  if (preferredPort && (await checkPortAvailable(preferredPort, host))) {
+    return preferredPort
+  }
+  const start = 51826
+  for (let p = start; p <= 51850; p++) {
+    if (p === preferredPort) continue
+    if (await checkPortAvailable(p, host)) {
+      return p
+    }
+  }
+  return new Promise((resolve) => {
+    const s = net.createServer()
+    s.listen(0, host, () => {
+      const port = s.address().port
+      s.close(() => resolve(port))
+    })
+  })
+}
+
+/**
  * Detects legitimate local LAN interfaces (Ethernet, Wi-Fi, Mobile Hotspot),
- * strictly excluding internal VM switches (Hyper-V / vEthernet, WSL, VMware, VirtualBox, loopback, bluetooth).
+ * strictly excluding virtual adapters and VM switches (Hyper-V / vEthernet, WSL, VMware, VirtualBox, loopback, bluetooth).
  */
 export function detectLanInterfaces() {
   const ifaces = os.networkInterfaces()
@@ -69,15 +128,28 @@ export function detectLanInterfaces() {
     if (
       lower.includes('vethernet') ||
       lower.includes('virtualbox') ||
+      lower.includes('vbox') ||
       lower.includes('vmware') ||
+      lower.includes('vmnet') ||
       lower.includes('loopback') ||
       lower.includes('bluetooth') ||
-      lower.includes('wsl')
+      lower.includes('wsl') ||
+      lower.includes('pseudo') ||
+      lower.includes('teredo') ||
+      lower.includes('isatap') ||
+      lower.includes('docker') ||
+      lower.includes('cni')
     ) {
       continue
     }
     for (const info of list) {
-      if (!info.internal && info.family === 'IPv4' && !info.address.startsWith('169.254.')) {
+      const isIpv4 = info.family === 'IPv4' || info.family === 4
+      if (
+        !info.internal &&
+        isIpv4 &&
+        !info.address.startsWith('169.254.') &&
+        !info.address.startsWith('127.')
+      ) {
         valid.push(name)
         break
       }
@@ -169,33 +241,42 @@ export class HomeKitManager {
     this.storageInitialized = true
   }
 
-  loadOrCreateConfig() {
+  async loadOrCreateConfig() {
     this.setupStorage()
+    let config = null
     if (fs.existsSync(this.configFile)) {
       try {
         const raw = fs.readFileSync(this.configFile, 'utf-8')
         const data = JSON.parse(raw)
         if (data && data.username && data.pincode && data.port) {
-          return data
+          config = data
         }
       } catch (err) {
         console.warn('[Lumos HomeKit] Could not read existing bridge config, generating new:', err)
       }
     }
 
-    const newConfig = {
-      username: generateMacUsername(),
-      pincode: generateRandomPincode(),
-      port: 51826
+    if (!config) {
+      config = {
+        username: generateMacUsername(),
+        pincode: generateRandomPincode(),
+        port: 51826
+      }
+    }
+
+    const safePort = await findAvailablePort(config.port)
+    if (safePort !== config.port) {
+      console.log(`[Lumos HomeKit] Configured port ${config.port} unavailable, using ${safePort}`)
+      config.port = safePort
     }
 
     try {
-      fs.writeFileSync(this.configFile, JSON.stringify(newConfig, null, 2), 'utf-8')
+      fs.writeFileSync(this.configFile, JSON.stringify(config, null, 2), 'utf-8')
     } catch (err) {
       console.error('[Lumos HomeKit] Failed to save bridge config:', err)
     }
 
-    return newConfig
+    return config
   }
 
   /** Effects are exposed as Switch accessories so they can be toggled from Apple Home and Siri. */
@@ -207,7 +288,7 @@ export class HomeKitManager {
     if (this.isInitialized) return
     this.setupStorage()
     this.lightManager = lightManager
-    this.config = this.loadOrCreateConfig()
+    this.config = await this.loadOrCreateConfig()
 
     await this.publishBridge()
     this.isInitialized = true
@@ -271,10 +352,7 @@ export class HomeKitManager {
       onChar
         .onGet(() => {
           const state = light.getState()
-          if (!state.online) {
-            throw new HapStatusError(HAP_SERVICE_COMMUNICATION_FAILURE)
-          }
-          return state.power
+          return Boolean(state.power)
         })
         .onSet(async (value) => {
           markManual('power')
@@ -305,10 +383,7 @@ export class HomeKitManager {
       briChar
         .onGet(() => {
           const state = light.getState()
-          if (!state.online) {
-            throw new HapStatusError(HAP_SERVICE_COMMUNICATION_FAILURE)
-          }
-          return state.brightness
+          return typeof state.brightness === 'number' ? state.brightness : 100
         })
         .onSet(async (value) => {
           markManual()
@@ -380,9 +455,6 @@ export class HomeKitManager {
       ctChar
         .onGet(() => {
           const state = light.getState()
-          if (!state.online) {
-            throw new HapStatusError(HAP_SERVICE_COMMUNICATION_FAILURE)
-          }
           return lumosColorTempToMireds(state.colorTemp)
         })
         .onSet(async (value) => {
@@ -403,9 +475,6 @@ export class HomeKitManager {
       hueChar
         .onGet(() => {
           const state = light.getState()
-          if (!state.online) {
-            throw new HapStatusError(HAP_SERVICE_COMMUNICATION_FAILURE)
-          }
           return state.color ? state.color.h : 0
         })
         .onSet(async (value) => {
@@ -419,9 +488,6 @@ export class HomeKitManager {
       satChar
         .onGet(() => {
           const state = light.getState()
-          if (!state.online) {
-            throw new HapStatusError(HAP_SERVICE_COMMUNICATION_FAILURE)
-          }
           return state.color ? state.color.s : 100
         })
         .onSet(async (value) => {
@@ -494,6 +560,16 @@ export class HomeKitManager {
     loadHap()
     if (!this.config || !this.lightManager) return
 
+    // Ensure the target port is currently bindable before creating the bridge
+    const safePort = await findAvailablePort(this.config.port || 51826)
+    if (safePort !== this.config.port) {
+      console.log(`[Lumos HomeKit] Switching bridge port from ${this.config.port} to ${safePort}`)
+      this.config.port = safePort
+      try {
+        fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2), 'utf-8')
+      } catch {}
+    }
+
     const bridgeUuid = uuid.generate('lumos-bridge-root')
     this.bridge = new Bridge('Lumos', bridgeUuid)
 
@@ -541,21 +617,48 @@ export class HomeKitManager {
     )
     console.log(`[Lumos HomeKit] Binding interfaces: ${bindOption.join(', ')} (Advertiser: ciao)`)
 
-    await this.bridge.publish({
-      username: this.config.username,
-      pincode: this.config.pincode,
-      port: this.config.port,
-      category: HAP_CATEGORY_BRIDGE,
-      advertiser: 'ciao',
-      bind: bindOption
-    })
-
-    console.log(`[Lumos HomeKit] Bridge published! Setup PIN: ${this.config.pincode}`)
+    try {
+      await this.bridge.publish({
+        username: this.config.username,
+        pincode: this.config.pincode,
+        port: this.config.port,
+        category: HAP_CATEGORY_BRIDGE,
+        advertiser: 'ciao',
+        bind: bindOption
+      })
+      console.log(`[Lumos HomeKit] Bridge published! Setup PIN: ${this.config.pincode}`)
+    } catch (err) {
+      console.error(`[Lumos HomeKit] Failed publishing on port ${this.config.port}:`, err)
+      const altPort = await findAvailablePort(this.config.port + 1)
+      if (altPort !== this.config.port) {
+        console.log(`[Lumos HomeKit] Retrying publish on alternative port ${altPort}...`)
+        this.config.port = altPort
+        try {
+          fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2), 'utf-8')
+        } catch {}
+        await this.bridge.publish({
+          username: this.config.username,
+          pincode: this.config.pincode,
+          port: this.config.port,
+          category: HAP_CATEGORY_BRIDGE,
+          advertiser: 'ciao',
+          bind: bindOption
+        })
+        console.log(`[Lumos HomeKit] Bridge published on retry! Setup PIN: ${this.config.pincode}`)
+      } else {
+        throw err
+      }
+    }
   }
 
   async getHomeKitInfo() {
     const isPaired = Boolean(this.bridge?._accessoryInfo?.paired())
-    const setupURI = this.bridge?.setupURI() || ''
+    let setupURI = ''
+    try {
+      setupURI = this.bridge?.setupURI() || ''
+    } catch {
+      setupURI = ''
+    }
     let qrCodeDataUrl = ''
 
     if (setupURI) {
@@ -589,7 +692,7 @@ export class HomeKitManager {
     if (this.bridge) {
       try {
         await this.bridge.unpublish()
-        this.bridge.destroy()
+        await this.bridge.destroy()
       } catch (err) {
         console.warn('[Lumos HomeKit] Error unpublishing bridge during reset:', err)
       }
@@ -605,7 +708,18 @@ export class HomeKitManager {
     }
     this.accessories = []
 
-    // 3. Clear storage directory (preserve hap-debug.log)
+    // 3. Wait briefly for closing sockets to finish releasing ports
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    // 4. Clear storage directory (preserve hap-debug.log) and clear in-memory HAPStorage
+    try {
+      if (HAPStorage && typeof HAPStorage.storage === 'function') {
+        HAPStorage.storage().clearSync()
+      }
+    } catch (err) {
+      console.warn('[Lumos HomeKit] Error clearing HAP storage in-memory cache:', err)
+    }
+
     if (fs.existsSync(this.storagePath)) {
       const files = fs.readdirSync(this.storagePath)
       for (const file of files) {
@@ -618,11 +732,12 @@ export class HomeKitManager {
       }
     }
 
-    // 4. Generate new MAC-style username and fresh random pincode for fresh pairing identity
+    // 5. Generate new MAC-style username and fresh random pincode for fresh pairing identity
+    const safePort = await findAvailablePort(51826)
     this.config = {
       username: generateMacUsername(),
       pincode: generateRandomPincode(),
-      port: 51826
+      port: safePort
     }
 
     try {
@@ -631,7 +746,7 @@ export class HomeKitManager {
       console.error('[Lumos HomeKit] Failed saving updated bridge config:', err)
     }
 
-    // 5. Rebuild and re-publish bridge
+    // 6. Rebuild and re-publish bridge
     await this.publishBridge()
 
     return this.getHomeKitInfo()

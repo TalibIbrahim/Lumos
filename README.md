@@ -508,8 +508,8 @@ From then on, the second computer stops connecting to the lights itself. Its lig
 - Only bulbs that report `colour_data_v2` or `colour_data` in their DPS mapping provide RGB color controls. White/CCT-only bulbs will show brightness and temperature sliders only.
 
 ### HomeKit Accessory Not Discovered
-- Check that Windows Defender Firewall is not blocking port 51826 or mDNS UDP port 5353.
-- Verify that your PC and iOS device are connected to the same subnet/VLAN without client isolation enabled.
+- Check that Windows Defender Firewall is not blocking the HomeKit bridge ports (51826–51850) or mDNS UDP port 5353. If port 51826 is reserved by Windows (Hyper-V / WinNAT), Lumos automatically selects the next available port in this range.
+- Verify that your PC and iOS device are connected to the same subnet/VLAN without client isolation enabled, or that your iOS device is connected to the PC's Mobile Hotspot network.
 
 ---
 
