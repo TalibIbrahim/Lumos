@@ -32,6 +32,8 @@ export interface ScreenSyncSettings extends EffectSettingsBase {
   saturation: number
   minBrightness: number
   maxBrightness: number
+  /** Always output at maximum brightness, bypassing luminance dimming. */
+  fullBrightness: boolean
   /** Width of the edge strips, in percent of the picture. */
   edgeWidth: number
   intensity: number
@@ -142,6 +144,7 @@ export class ScreenSyncEffect extends Effect<ScreenSyncSettings> implements Laye
       saturation: 25,
       minBrightness: 8,
       maxBrightness: 100,
+      fullBrightness: false,
       edgeWidth: 18,
       intensity: 100,
       ignoreBars: true,
@@ -170,6 +173,7 @@ export class ScreenSyncEffect extends Effect<ScreenSyncSettings> implements Laye
       saturation: int(o.saturation, d.saturation, 0, 100),
       minBrightness: minB,
       maxBrightness: Math.max(minB + 5, int(o.maxBrightness, d.maxBrightness, 10, 100)),
+      fullBrightness: bool(o.fullBrightness, d.fullBrightness),
       edgeWidth: int(o.edgeWidth, d.edgeWidth, 5, 40),
       intensity: int(o.intensity, d.intensity, 10, 100),
       ignoreBars: bool(o.ignoreBars, d.ignoreBars),
@@ -192,6 +196,7 @@ export class ScreenSyncEffect extends Effect<ScreenSyncSettings> implements Laye
       saturation: s.saturation,
       minBrightness: s.minBrightness,
       maxBrightness: s.maxBrightness,
+      fullBrightness: s.fullBrightness,
       intensity: s.intensity,
       dimDarkScenes: s.dimDarkScenes,
       limiter: s.limiter,

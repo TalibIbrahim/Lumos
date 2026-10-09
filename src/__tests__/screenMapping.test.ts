@@ -87,6 +87,12 @@ describe('Screen Sync: brightness and colour mapping', () => {
     expect(zoneToBulb(state(0.05), { ...tuning, dimDarkScenes: false }).brightness).toBe(100)
   })
 
+  it('locks to maximum brightness in full brightness mode even in dark scenes', () => {
+    expect(zoneToBulb(state(0.02), { ...tuning, fullBrightness: true }).brightness).toBe(100)
+    expect(zoneToBulb(state(0.02), { ...tuning, fullBrightness: true, maxBrightness: 80 }).brightness).toBe(80)
+    expect(zoneToBulb(state(0.02), { ...tuning, fullBrightness: true, maxBrightness: 80, intensity: 50 }).brightness).toBe(40)
+  })
+
   it('intensity scales everything down', () => {
     const half = zoneToBulb(state(1), { ...tuning, intensity: 50 })
     const fullOut = zoneToBulb(state(1), tuning)

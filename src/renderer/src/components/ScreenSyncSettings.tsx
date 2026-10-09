@@ -263,6 +263,12 @@ export const ScreenSyncSettings: React.FC<{
 
       <Group title="Colour and brightness">
         <Row
+          label="Full brightness"
+          hint="Always project at maximum brightness so ambient light reaches across the room, even during dark scenes."
+        >
+          <ToggleButton on={!!s.fullBrightness} onChange={(on) => patch({ fullBrightness: on })} ariaLabel="Full brightness" />
+        </Row>
+        <Row
           label="Movie mode"
           hint="Colour only, and easy on the eyes: the lights match the picture instead of switching to plain white, and brightness rises slowly so a cut to a bright scene never flashes. Dim in dark scenes does not apply."
         >
@@ -287,9 +293,11 @@ export const ScreenSyncSettings: React.FC<{
         <Row label="Saturation boost" stacked>
           <RangeControl ariaLabel="Saturation boost" value={s.saturation} min={0} max={100} onChange={(v) => patch({ saturation: v })} format={(v) => `${v}%`} />
         </Row>
-        <Row label="Minimum brightness" hint="Bulbs behave badly near zero. At 0 the lights turn off in black scenes." stacked>
-          <RangeControl ariaLabel="Minimum brightness" value={s.minBrightness} min={0} max={60} onChange={(v) => patch({ minBrightness: v })} format={(v) => `${v}%`} />
-        </Row>
+        {!s.fullBrightness && (
+          <Row label="Minimum brightness" hint="Bulbs behave badly near zero. At 0 the lights turn off in black scenes." stacked>
+            <RangeControl ariaLabel="Minimum brightness" value={s.minBrightness} min={0} max={60} onChange={(v) => patch({ minBrightness: v })} format={(v) => `${v}%`} />
+          </Row>
+        )}
         <Row label="Maximum brightness" stacked>
           <RangeControl ariaLabel="Maximum brightness" value={s.maxBrightness} min={10} max={100} onChange={(v) => patch({ maxBrightness: v })} format={(v) => `${v}%`} />
         </Row>
@@ -302,9 +310,11 @@ export const ScreenSyncSettings: React.FC<{
         <Row label="Ignore black bars" hint="Films with bars above and below do not make the lights dark.">
           <ToggleButton on={s.ignoreBars} onChange={(on) => patch({ ignoreBars: on })} ariaLabel="Ignore black bars" />
         </Row>
-        <Row label="Dim in dark scenes">
-          <ToggleButton on={s.dimDarkScenes} onChange={(on) => patch({ dimDarkScenes: on })} ariaLabel="Dim in dark scenes" />
-        </Row>
+        {!s.fullBrightness && (
+          <Row label="Dim in dark scenes">
+            <ToggleButton on={s.dimDarkScenes} onChange={(on) => patch({ dimDarkScenes: on })} ariaLabel="Dim in dark scenes" />
+          </Row>
+        )}
       </Group>
 
       <Group title="Safety">

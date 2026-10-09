@@ -353,12 +353,12 @@ The picture is analysed on this computer as it plays. Frames are never saved, se
 
 - **Mode:** Cinema (smooth, with a longer fade), Gaming (fast), or Custom.
 - **Sliders:** response speed, saturation boost, minimum and maximum brightness, edge width, and intensity.
-- **Toggles:** ignore black bars (on by default), dim in dark scenes (on), and limit brightness changes (on).
+- **Toggles:** full brightness (off by default, keeps lights at maximum output so ambient light reaches across the room even during dark scenes), ignore black bars (on by default), dim in dark scenes (on), and limit brightness changes (on).
 - **Display:** choose which display to follow; if it disconnects, Screen Sync follows the main display until it returns, and it follows resolution changes on its own.
 - **Live preview:** the settings show the captured picture with each light's area outlined and the colour each light is being sent, along with the measured delay from screen to light.
 - **Keyboard shortcut:** optionally toggle Screen Sync from anywhere (Ctrl+Alt+S, Ctrl+Shift+S, or Ctrl+Alt+L). It is also in the tray menu, in Apple Home as a Screen Sync switch, and on the webhook as `/api/v1/effects/screen`.
 
-Dark scenes dim the lights without turning them off. Set the minimum brightness to 0 if you want them to go off in black scenes.
+Dark scenes dim the lights without turning them off (unless Full brightness is on, which keeps maximum brightness). Set the minimum brightness to 0 if you want them to go off in black scenes.
 
 **With other effects.** Screen Sync comes first among the ambient effects. On the lights it drives, Music and Album color step aside, and their cards say so; on lights without a position they carry on. When Screen Sync stops, starts, or a light leaves it, the lights fade from what they showed to what comes next instead of jumping. Away dimming and game flashes still take priority over Screen Sync. Changing a light's colour or brightness by hand takes it out of Screen Sync until you resume it; switching a light on or off does not.
 

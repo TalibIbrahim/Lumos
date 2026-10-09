@@ -11,6 +11,8 @@ export interface SyncTuning {
   /** Brightness floor and ceiling in percent. A floor of 0 lets lights turn off in black scenes. */
   minBrightness: number
   maxBrightness: number
+  /** Always output at maximum brightness, bypassing luminance dimming. */
+  fullBrightness?: boolean
   /** 0..100: scales brightness and colourfulness. */
   intensity: number
   dimDarkScenes: boolean
@@ -154,7 +156,11 @@ function zoneToBulbMovie(z: ZoneState, tuning: SyncTuning): BulbColor {
   const lit = clamp((z.luminance - MOVIE_DARK_LUMA) / (1 - MOVIE_DARK_LUMA), 0, 1)
   // With dark scenes allowed to go off the floor is zero; otherwise they keep the minimum brightness
   const floor = tuning.movieOffInDark === false ? Math.min(Math.max(1, clamp(tuning.minBrightness, 0, 100)), ceiling) : 0
-  const brightness = clamp((floor + (ceiling - floor) * Math.pow(lit, 0.6)) * intensity, 0, 100)
+  const brightness = clamp(
+    (tuning.fullBrightness ? ceiling : floor + (ceiling - floor) * Math.pow(lit, 0.6)) * intensity,
+    0,
+    100
+  )
   const boost = 1 + clamp(tuning.saturation, 0, 100) / 100
   // A vivid zone keeps its dominant colour; otherwise the zone's own average colour is used, so a warm
   // white scene stays warm instead of switching to a plain white
@@ -176,11 +182,16 @@ export function zoneToBulb(z: ZoneState, tuning: SyncTuning): BulbColor {
   const intensity = clamp(tuning.intensity, 0, 100) / 100
   const floor = clamp(tuning.minBrightness, 0, 100)
   const ceiling = Math.max(floor, clamp(tuning.maxBrightness, 0, 100))
-  // Perceptual curve so mid tones are not too dim on the bulb
-  const curve = Math.pow(clamp(z.luminance, 0, 1), 0.6)
-  const level = tuning.dimDarkScenes ? curve : 1
-  let brightness = (floor + (ceiling - floor) * level) * intensity
-  if (floor > 0) brightness = Math.max(Math.min(floor, ceiling) * Math.min(1, intensity + 0.0001), brightness)
+  let brightness: number
+  if (tuning.fullBrightness) {
+    brightness = ceiling * intensity
+  } else {
+    // Perceptual curve so mid tones are not too dim on the bulb
+    const curve = Math.pow(clamp(z.luminance, 0, 1), 0.6)
+    const level = tuning.dimDarkScenes ? curve : 1
+    brightness = (floor + (ceiling - floor) * level) * intensity
+    if (floor > 0) brightness = Math.max(Math.min(floor, ceiling) * Math.min(1, intensity + 0.0001), brightness)
+  }
   brightness = clamp(brightness, 0, 100)
 
   // Bulbs need strong saturation to read as coloured
