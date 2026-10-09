@@ -76,8 +76,10 @@ The window scales down to 760 by 520 pixels and up to any size.
 
 ### Effects
 - **Screen Sync**: lights follow the edges of your screen.
-- **Music**: lighting that moves with what you play, including a Party style that reacts to drops.
+- **Music**: lighting that moves with what you play, including Party and Bass Drop styles.
 - **Album color**: lights take the colours of the album art that is playing.
+- **Chroma cycle**: smooth 360° rainbow spectrum wave cycling like RGB keyboards.
+- **Acoustic Fireplace**: organic ember and flame simulation with audio-reactive flares.
 - **Away dimming**: lights dim when you step away.
 - **Games**: Rocket League goal flashes and a low-health pulse for Counter-Strike 2 and League of Legends.
 - **Effect safety**: a flash limiter for photosensitivity, and optional [Bulb protection](#photosensitivity) for the hardware.
@@ -274,7 +276,7 @@ curl -X POST http://127.0.0.1:8989/api/v1/effects/music/toggle \
 
 ## Effects
 
-The **Effects** page holds five effects. Each has an on/off toggle, a status (off, waiting, active, or needs attention), a choice of which lights it uses (all lights by default), and its own settings. Settings are saved in your user data folder (`effects.json`), and effects that were on when Lumos closed turn back on at launch unless you switch that off in **Effect safety**.
+The **Effects** page holds seven effects. Each has an on/off toggle, a status (off, waiting, active, or needs attention), a choice of which lights it uses (all lights by default), and its own settings. Settings are saved in your user data folder (`effects.json`), and effects that were on when Lumos closed turn back on at launch unless you switch that off in **Effect safety**.
 
 ### How effects share your lights
 
@@ -285,13 +287,14 @@ Effects never send commands to lights themselves. A compositor in the main proce
 3. Screen Sync (on the lights it drives, Music and Album color step aside)
 4. Music
 5. Album color
-6. Your own settings, scenes, and automations
+6. Chroma cycle & Acoustic Fireplace
+7. Your own settings, scenes, and automations
 
 When an effect ends, lights return to whatever the layers underneath show at that moment, not to a snapshot from when it began, so changes made in the meantime are kept. Changes between states fade smoothly.
 
 All commands go through one queue per light with a budget of 12 commands per second (adjustable from 2 to 20 in **Effect safety**). When a light is busy, older frames are dropped and only the newest is sent. A single change you make by hand is always sent straight away.
 
-**Changing a light's colour or brightness by hand** (in Lumos, from Apple Home, or through the webhook) takes that light out of Screen Sync, Music, and Album color. Switching it on or off does not. A short notice names the effect that paused, with a **Resume** button; you can also resume from the effect's settings. A light you change from your phone while the computer is away keeps your change when you come back.
+**Changing a light's colour or brightness by hand** (in Lumos, from Apple Home, or through the webhook) takes that light out of Screen Sync, Music, Album color, Chroma cycle, and Fireplace. Switching it on or off does not. A short notice names the effect that paused, with a **Resume** button; you can also resume from the effect's settings. A light you change from your phone while the computer is away keeps your change when you come back.
 
 ### Photosensitivity
 
@@ -301,7 +304,19 @@ Light that changes quickly can affect people with photosensitive epilepsy. No ef
 
 ### Control from Apple Home, Siri, and webhooks
 
-Each effect appears in Apple Home as a switch named Screen Sync, Music mode, Album color, Away mode, and Game mode, so you can say "turn on Music mode". The same toggles are available on the local webhook (see below).
+Each effect appears in Apple Home as a switch named Screen Sync, Music mode, Album color, Chroma cycle, Fireplace, Away mode, and Game mode, so you can say "turn on Music mode" or "turn on Fireplace". The same toggles are available on the local webhook (see below).
+
+### Optimal presets for visual appeal
+
+Every effect mode includes a curated, one-click preset tuned for peak visual appeal, accessible directly from the effect card (**Run preset** / **Best settings**) and inside its settings sheet:
+
+- **Screen Sync (Cinema Master):** Movie mode on, 45% movie ceiling, 25 rise speed, edge width 18, 70% max brightness, black bar filter, limiter on, and slow dark fades for film immersion.
+- **Music (Deep Bass & Drop):** Sub-bass focus with rolling transitions, neon palette, room-wide wave offset, and instant 100% brightness surges on beat drops.
+- **Album color (Art Palette Spread):** Spreads distinct harmony colors across all lights with a 15-second gentle fade after playback pauses.
+- **Chroma cycle (Liquid Rainbow):** 45-second full-spectrum 360° rotation with 100% saturation and brightness, spatially offset across left and right lights.
+- **Acoustic Fireplace (Living Hearth):** 85% flame intensity and 45 speed with multi-light hearth phase offsets and acoustic audio reactivity.
+- **Away dimming (Smart Ambient Away):** 5-minute idle threshold, dimming gently to 20% while staying on during music and video.
+- **Games (Competitive Arena):** Team-colored 3-flash celebrations for goals, kickoff and victory signals, and low-health warning pulses at 25% HP.
 
 ### Screen Sync
 
@@ -367,10 +382,11 @@ The brightness-change limiter caps how often brightness can swing by a large amo
 
 Your lights follow the music playing on this computer. Beats become brightness pulses shaped to what bulbs can follow (a quick rise and a smooth fall, never a strobe), and colour drifts through a colour set at a pace tied to how energetic the track is. Colours can move from light to light like a wave.
 
-There are two styles:
+There are three styles:
 
 - **Smooth** (the default): gentle pulses and slowly drifting colours.
 - **Party**: the lights snap to each beat, step to the next colour, and sit dark in between. When the beat drops (the bass comes back hard after a build-up or breakdown), every light goes full white for a moment, and each beat after that hits full brightness for about 16 seconds. The flash limit still applies, and with reduced intensity on, the white burst is skipped.
+- **Bass Drop**: responds strictly to the low-end groove (sub-bass) with slow, gentle rolling brightness changes. When a beat drop lands, brightness surges to 100% MAX within the safety guard.
 
 - **Setup:** none. Lumos listens to the system output using Electron's loopback audio capture on Windows.
 - **Settings:** sensitivity, colour set (Aurora, Sunset, Ocean, Neon, or your own), style, pulse strength (in Party, how dark the lights go between beats), colour drift, most beats per second (at most the safety cap), and **Pause when the music stops**: after that many seconds without sound, Music lets go and your lights return to how they were, then picks up again as soon as something plays. The settings sheet shows a live level meter to help you tune sensitivity.
@@ -390,6 +406,22 @@ Your lights take on the colours of the album art for whatever is playing: Spotif
 - **Limitations:** Windows 10 or later. Players that do not publish album art to Windows are not tinted.
 
 **Why a helper program:** Windows exposes the media session through WinRT. The options were a NodeRT binding (a native module that must be rebuilt for every Electron version and is no longer maintained), a PowerShell bridge (slow to start, blocked by some execution policies, and unable to read the album art reliably), or a small helper. Lumos uses a helper written in C# and compiled during the build with the compiler that comes with the .NET Framework on every Windows 10 and 11 installation, so nothing extra is needed to build or run it. It also reports the system output level and whether a full-screen app is open, which Away dimming uses.
+
+### Chroma cycle
+
+Smoothly cycles your lights through the entire 360° color spectrum over time, inspired by mechanical RGB keyboard lighting.
+
+- **Setup:** none.
+- **Settings:** cycle time (10 to 300 seconds, default 60 s), brightness (1 to 100%), saturation (1 to 100%), spectrum wave toggle (offsets colors across lights so they form a continuous rainbow across the room), and reverse direction.
+- **Safety:** at the default 60 s rotation, hue advances by only ~0.5° per command, producing zero hardware strain on the bulb's controller.
+
+### Acoustic Fireplace
+
+Simulates an organic living hearth fire with deep ember tones (14° red-orange) and dancing golden flames (38°).
+
+- **Setup:** none.
+- **Settings:** flame intensity (10 to 100%, default 80%), flame speed (10 to 100%, default 50%), acoustic reactivity (on by default), and multi-light hearth phase offset.
+- **Acoustic reactivity:** when music or sound plays on your computer, low-frequency bass and audio swells flare up the fire's heat and brightness. When silent, it relaxes into a calm, breathing hearth glow.
 
 ### Away dimming
 

@@ -15,7 +15,8 @@ export enum LayerPriority {
   /** Screen Sync drives its lights alone: Music and Album color step aside on them. */
   ScreenSync = 3,
   Music = 4,
-  NowPlaying = 5
+  NowPlaying = 5,
+  Ambient = 6
 }
 
 export interface ComposeContext {

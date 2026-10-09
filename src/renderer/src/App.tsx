@@ -359,8 +359,25 @@ export const App: React.FC = () => {
   }, [])
 
   const handleApplyScene = useCallback((sceneId: string) => {
+    const scene = store?.presets.find((p) => p.id === sceneId)
+    if (scene) {
+      setLights((prev) =>
+        prev.map((l) =>
+          l.online
+            ? {
+                ...l,
+                power: true,
+                brightness: scene.brightness,
+                mode: scene.mode,
+                colorTemp: scene.colorTemp,
+                color: scene.color ? { ...scene.color, v: scene.brightness } : l.color
+              }
+            : l
+        )
+      )
+    }
     ;(window.lumos || window.lumen)?.applyPreset(sceneId, 'all')
-  }, [])
+  }, [store])
 
   const handleSaveScene = useCallback(async (scene: Preset) => {
     const api = window.lumos || window.lumen

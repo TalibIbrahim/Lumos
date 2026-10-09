@@ -1,12 +1,13 @@
 import React, { useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
-import { ShieldCheck, ChevronRight, LightbulbOff } from 'lucide-react'
+import { ShieldCheck, ChevronRight, LightbulbOff, Sparkles, Check } from 'lucide-react'
 import { GlassSurface } from './ui/GlassSurface'
 import { GlassButton } from './ui/GlassButton'
 import { StatusPill, ToggleButton, GlassSheet, Group, Row, Segmented, RangeControl, PhotosensitivityNote } from './ui/SettingsControls'
 import { EffectSettingsSheet } from './EffectSettingsSheet'
 import { springs } from '../lib/constants'
 import { EFFECT_ICONS } from '../lib/effectIcons'
+import { EFFECT_PRESETS } from '../lib/effectPresets'
 import { EffectsSnapshotData, EffectSnapshotData, NormalizedLightState, WebhookInfo } from '../types'
 
 type GameState = 'off' | 'waiting' | 'connected' | 'in-match' | 'error'
@@ -42,7 +43,23 @@ export const EffectsView: React.FC<EffectsViewProps> = ({ snapshot, lights, isDe
   const reduceMotion = useReducedMotion()
   const [openId, setOpenId] = useState<string | null>(null)
   const [safetyOpen, setSafetyOpen] = useState(false)
+  const [appliedId, setAppliedId] = useState<string | null>(null)
   const noLights = lights.length === 0
+
+  const handleRunPreset = async (effectId: string) => {
+    const preset = EFFECT_PRESETS[effectId]
+    if (!preset) return
+    const eff = snapshot?.effects.find((e) => e.id === effectId)
+    if (!eff) return
+    await window.lumos?.updateEffectSettings(effectId, preset.settings)
+    if (!eff.settings.enabled) {
+      onToggle(effectId, true)
+    }
+    setAppliedId(effectId)
+    setTimeout(() => {
+      setAppliedId((current) => (current === effectId ? null : current))
+    }, 2500)
+  }
 
   if (!snapshot) {
     return (
@@ -85,6 +102,8 @@ export const EffectsView: React.FC<EffectsViewProps> = ({ snapshot, lights, isDe
               disabled={noLights}
               onOpen={() => setOpenId(effect.id)}
               onToggle={(on) => onToggle(effect.id, on)}
+              onRunPreset={() => void handleRunPreset(effect.id)}
+              isPresetApplied={appliedId === effect.id}
               note={yieldNote(effect, snapshot)}
             />
           </motion.div>
@@ -135,9 +154,12 @@ const EffectCard: React.FC<{
   disabled: boolean
   onOpen: () => void
   onToggle: (on: boolean) => void
+  onRunPreset: () => void
+  isPresetApplied: boolean
   note?: string | null
-}> = ({ effect, lights, disabled, onOpen, onToggle, note }) => {
+}> = ({ effect, lights, disabled, onOpen, onToggle, onRunPreset, isPresetApplied, note }) => {
   const Icon = EFFECT_ICONS[effect.id] || ShieldCheck
+  const preset = EFFECT_PRESETS[effect.id]
   const on = effect.settings.enabled
   const active = effect.status === 'active'
   const pausedNames = effect.pausedLights
@@ -196,6 +218,37 @@ const EffectCard: React.FC<{
           <p className="text-[11px] text-zinc-500">
             Paused on {pausedNames.join(', ')} because {pausedNames.length === 1 ? 'it was' : 'they were'} changed by hand.
           </p>
+        )}
+
+        {preset && (
+          <div className="mt-auto pt-2.5 flex items-center justify-between gap-2 border-t border-white/[0.04]">
+            <span className="text-[11px] text-zinc-400 flex items-center gap-1.5 truncate">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400/80 flex-shrink-0" />
+              <span className="truncate">{preset.name}</span>
+            </span>
+            <GlassButton
+              variant={isPresetApplied ? 'subtle' : on ? 'subtle' : 'standard'}
+              size="sm"
+              disabled={disabled}
+              onClick={(e) => {
+                e.stopPropagation()
+                onRunPreset()
+              }}
+              aria-label={`Run ${preset.name} preset for ${effect.label}`}
+            >
+              {isPresetApplied ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-300" />
+                  <span>Applied</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>{on ? 'Best settings' : 'Run preset'}</span>
+                </>
+              )}
+            </GlassButton>
+          </div>
         )}
       </div>
     </GlassSurface>

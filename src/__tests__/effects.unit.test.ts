@@ -16,6 +16,8 @@ import { HealthPulseLayer, pulsePeriodMs, PULSE_FAST_MS, PULSE_SLOW_MS, DEATH_HO
 import { decideAway, nextIdleCheckMs, AwayRules } from '../main/effects/away/awayLogic'
 import { accumulate, brightnessLevel, dayKey, estimateWatts, lastDays, prune, DailyTotals } from '../main/energy/model'
 import {
+  bassBrightness,
+  bassEnvelope,
   paletteColor,
   partyBrightness,
   partyColor,
@@ -24,6 +26,8 @@ import {
   pulseEnvelope,
   PALETTES
 } from '../main/effects/music/mapping'
+import { colorCycleHue } from '../main/effects/cycle/ColorCycleEffect'
+import { flameFlicker, fireplaceOutput, MIN_EMBER_HUE, MAX_FLAME_HUE } from '../main/effects/fireplace/fireLogic'
 import { parseHelperLine } from '../main/system/systemMonitor'
 import { sanitizeFeatures } from '../main/effects/music/features'
 import { LightOutput } from '../main/effects/output'
@@ -462,6 +466,87 @@ describe('Music mapping', () => {
     expect(partyColor(p, 1, 1, false)).toEqual(p[1])
     expect(partyColor(p, 3, 0, true)).toEqual(p[0])
   })
+
+  it('bass style responds gently to sub-bass and surges to 100 on beat drops', () => {
+    // Envelope has a gentle attack and long decay
+    expect(bassEnvelope(0, 1, 120)).toBe(0)
+    expect(bassEnvelope(120, 1, 120)).toBe(1)
+    expect(bassEnvelope(600, 1, 120)).toBeGreaterThan(0.2) // stays alive longer than party mode
+
+    // Normal sub-bass driving brightness
+    const normal = bassBrightness(60, 0.8, 0.4, 0.5, false)
+    expect(normal).toBeGreaterThan(60)
+    expect(normal).toBeLessThanOrEqual(100)
+
+    // Beat drop immediately surges to MAX (100)
+    expect(bassBrightness(60, 0.8, 0.4, 0.5, true)).toBe(100)
+    expect(bassBrightness(20, 0.1, 0, 0.5, true)).toBe(100)
+  })
+})
+
+describe('Chroma cycle: spectrum wave and color progression', () => {
+  it('advances hue smoothly around 360 degrees over speed duration', () => {
+    const speed = 60 // 60s per full cycle
+    expect(colorCycleHue(0, speed, false, false, 0, 1)).toBe(0)
+    expect(colorCycleHue(15000, speed, false, false, 0, 1)).toBe(90)
+    expect(colorCycleHue(30000, speed, false, false, 0, 1)).toBe(180)
+    expect(colorCycleHue(45000, speed, false, false, 0, 1)).toBe(270)
+    expect(colorCycleHue(60000, speed, false, false, 0, 1)).toBe(0)
+  })
+
+  it('reverses direction smoothly when reverse is true', () => {
+    const speed = 60
+    expect(colorCycleHue(0, speed, true, false, 0, 1)).toBe(360 % 360)
+    expect(colorCycleHue(15000, speed, true, false, 0, 1)).toBe(270)
+    expect(colorCycleHue(30000, speed, true, false, 0, 1)).toBe(180)
+  })
+
+  it('offsets lights evenly across the spectrum when wave is enabled', () => {
+    const speed = 60
+    // Two lights: index 0 and index 1
+    const h0 = colorCycleHue(0, speed, false, true, 0, 2)
+    const h1 = colorCycleHue(0, speed, false, true, 1, 2)
+    expect(h0).toBe(0)
+    expect(h1).toBe(180) // 180 degrees offset across 2 lights
+
+    // Three lights: 0, 120, 240 degrees offset
+    expect(colorCycleHue(0, speed, false, true, 0, 3)).toBe(0)
+    expect(colorCycleHue(0, speed, false, true, 1, 3)).toBe(120)
+    expect(colorCycleHue(0, speed, false, true, 2, 3)).toBe(240)
+  })
+})
+
+describe('Acoustic Fireplace: procedural flame and audio reactivity', () => {
+  it('generates heat and flicker bounded between realistic ranges', () => {
+    const f0 = flameFlicker(0, 50, 0)
+    expect(f0.heat).toBeGreaterThanOrEqual(0)
+    expect(f0.heat).toBeLessThanOrEqual(1)
+    expect(f0.flicker).toBeGreaterThanOrEqual(0.2)
+    expect(f0.flicker).toBeLessThanOrEqual(1.0)
+
+    // Phase offsets create distinct flame tongue heights
+    const fPhase = flameFlicker(0, 50, 1.8)
+    expect(fPhase.heat).not.toBe(f0.heat)
+  })
+
+  it('keeps hues strictly inside warm fireplace spectrum (14 to 38 deg)', () => {
+    const minFlame = fireplaceOutput(80, { heat: 0, flicker: 0.2 }, 0, false, 80)
+    expect(minFlame.h).toBe(MIN_EMBER_HUE)
+    expect(minFlame.s).toBeGreaterThanOrEqual(90)
+
+    const maxFlame = fireplaceOutput(80, { heat: 1, flicker: 1.0 }, 0, false, 80)
+    expect(maxFlame.h).toBe(MAX_FLAME_HUE)
+    expect(maxFlame.s).toBeGreaterThanOrEqual(90)
+  })
+
+  it('flares heat and brightness upwards when acoustic audio energy is present', () => {
+    const calm = fireplaceOutput(80, { heat: 0.3, flicker: 0.5 }, 0, true, 80)
+    const acousticSwell = fireplaceOutput(80, { heat: 0.3, flicker: 0.5 }, 0.9, true, 80)
+
+    // Swell increases heat (more golden amber) and brightness
+    expect(acousticSwell.h).toBeGreaterThan(calm.h)
+    expect(acousticSwell.brightness).toBeGreaterThan(calm.brightness)
+  })
 })
 
 describe('Validation of untrusted local inputs', () => {
@@ -540,3 +625,59 @@ describe('blendViaDark', () => {
     expect(blendViaDark(colour, white, 0)).toEqual(colour)
   })
 })
+
+import { EFFECT_PRESETS } from '../renderer/src/lib/effectPresets'
+
+describe('EFFECT_PRESETS', () => {
+  it('defines optimal presets for all 7 effect modes', () => {
+    const expectedIds = ['screen', 'music', 'album', 'cycle', 'fireplace', 'away', 'games']
+    for (const id of expectedIds) {
+      expect(EFFECT_PRESETS[id]).toBeDefined()
+      expect(EFFECT_PRESETS[id].id).toBe(id)
+      expect(EFFECT_PRESETS[id].name.length).toBeGreaterThan(0)
+      expect(EFFECT_PRESETS[id].badge.length).toBeGreaterThan(0)
+      expect(EFFECT_PRESETS[id].description.length).toBeGreaterThan(0)
+      expect(Object.keys(EFFECT_PRESETS[id].settings).length).toBeGreaterThan(0)
+    }
+  })
+
+  it('matches owner recommended settings for Screen Sync (Cinema Master)', () => {
+    const s = EFFECT_PRESETS.screen.settings
+    expect(s.colourOnly).toBe(true)
+    expect(s.movieCeiling).toBe(45)
+    expect(s.movieRise).toBe(25)
+    expect(s.movieSlowStop).toBe(true)
+    expect(s.movieOffInDark).toBe(true)
+    expect(s.maxBrightness).toBe(70)
+    expect(s.minBrightness).toBe(5)
+    expect(s.saturation).toBe(25)
+    expect(s.edgeWidth).toBe(18)
+    expect(s.intensity).toBe(100)
+    expect(s.ignoreBars).toBe(true)
+    expect(s.limiter).toBe(true)
+  })
+
+  it('configures sub-bass surge style for Music', () => {
+    const m = EFFECT_PRESETS.music.settings
+    expect(m.style).toBe('bass')
+    expect(m.wave).toBe(true)
+    expect(m.palette).toBe('neon')
+  })
+
+  it('configures liquid rainbow with spatial wave for Chroma cycle', () => {
+    const c = EFFECT_PRESETS.cycle.settings
+    expect(c.speed).toBe(45)
+    expect(c.brightness).toBe(100)
+    expect(c.saturation).toBe(100)
+    expect(c.wave).toBe(true)
+  })
+
+  it('configures acoustic hearth glow for Fireplace', () => {
+    const f = EFFECT_PRESETS.fireplace.settings
+    expect(f.intensity).toBe(85)
+    expect(f.flameSpeed).toBe(45)
+    expect(f.acoustic).toBe(true)
+    expect(f.wave).toBe(true)
+  })
+})
+

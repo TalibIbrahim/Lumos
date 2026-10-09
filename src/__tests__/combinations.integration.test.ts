@@ -7,6 +7,8 @@ import { EffectManager, PausedNotice } from '../main/effects/EffectManager'
 import { MusicEffect } from '../main/effects/music/MusicEffect'
 import { SimulatedMusicSource, MusicSource } from '../main/effects/music/capture'
 import { AlbumEffect } from '../main/effects/album/AlbumEffect'
+import { ColorCycleEffect } from '../main/effects/cycle/ColorCycleEffect'
+import { FireplaceEffect } from '../main/effects/fireplace/FireplaceEffect'
 import { AwayEffect, PowerSource } from '../main/effects/away/AwayEffect'
 import { GamesEffect } from '../main/effects/games/GamesEffect'
 import { SystemMonitor } from '../main/system/systemMonitor'
@@ -41,11 +43,13 @@ function setup() {
   const power = new FakePower()
   const music = new MusicEffect(manager.getHost(), (): MusicSource => new SimulatedMusicSource(), () => {})
   const album = new AlbumEffect(manager.getHost(), monitor, async (rgba, w, h) => extractColors(rgba, w, h))
+  const cycle = new ColorCycleEffect(manager.getHost())
+  const fireplace = new FireplaceEffect(manager.getHost(), (): MusicSource => new SimulatedMusicSource())
   const away = new AwayEffect(manager.getHost(), power, monitor)
   const games = new GamesEffect(manager.getHost(), { leagueFetch: async () => Promise.reject(new Error('none')) })
-  for (const e of [music, album, away, games]) manager.register(e)
+  for (const e of [music, album, cycle, fireplace, away, games]) manager.register(e)
   manager.attachLights()
-  return { manager, lights, log, monitor, power, music, album, away, games }
+  return { manager, lights, log, monitor, power, music, album, cycle, fireplace, away, games }
 }
 
 async function advance(ms: number, step = 33): Promise<void> {
@@ -251,6 +255,31 @@ describe('Combinations', () => {
     await advance(2000)
     expect(lights[0].lastSentOutput!.mode).toBe('white')
     expect(lights[0].lastSentOutput!.colorTemp).toBe(15)
+    await manager.shutdown()
+  })
+
+  it('chroma cycle drives continuous colour output and wave offset across lights', async () => {
+    const { manager, lights } = setup()
+    await manager.setEnabled('cycle', true)
+    await advance(2000)
+    expect(lights[0].lastSentOutput!.mode).toBe('colour')
+    expect(lights[1].lastSentOutput!.mode).toBe('colour')
+    // With wave on across lights, their hues are offset
+    expect(lights[0].lastSentOutput!.h).not.toBe(lights[1].lastSentOutput!.h)
+    await manager.setEnabled('cycle', false)
+    await advance(1500)
+    await manager.shutdown()
+  })
+
+  it('acoustic fireplace drives warm ember and flame hues', async () => {
+    const { manager, lights } = setup()
+    await manager.setEnabled('fireplace', true)
+    await advance(2000)
+    expect(lights[0].lastSentOutput!.mode).toBe('colour')
+    expect(lights[0].lastSentOutput!.h).toBeGreaterThanOrEqual(14)
+    expect(lights[0].lastSentOutput!.h).toBeLessThanOrEqual(38)
+    await manager.setEnabled('fireplace', false)
+    await advance(1500)
     await manager.shutdown()
   })
 })

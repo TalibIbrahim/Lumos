@@ -1000,6 +1000,38 @@ export class Light extends EventEmitter {
     return this.commit(...fields)
   }
 
+  public async applyPresetState(params: {
+    power?: boolean
+    mode: 'white' | 'colour'
+    brightness: number
+    colorTemp?: number
+    color?: { h: number; s: number; v?: number }
+  }): Promise<boolean> {
+    const fields: OutputField[] = ['power', 'mode']
+    this.power = params.power ?? true
+
+    const targetBri = Math.max(0, Math.min(100, Math.round(params.brightness)))
+    this.brightness = targetBri
+
+    if (params.mode === 'colour' && this.capabilities.hasColor) {
+      this.mode = 'colour'
+      const h = Math.max(0, Math.min(360, Math.round(params.color?.h ?? this.color.h)))
+      const s = Math.max(0, Math.min(100, Math.round(params.color?.s ?? this.color.s)))
+      const v = targetBri
+      this.color = { h, s, v }
+      fields.push('color')
+    } else {
+      this.mode = 'white'
+      if (params.colorTemp !== undefined) {
+        this.colorTemp = Math.max(0, Math.min(100, Math.round(params.colorTemp)))
+      }
+      fields.push('brightness', 'colorTemp')
+    }
+
+    this.emitState()
+    return this.commit(...fields)
+  }
+
   public async setWorkMode(mode: 'white' | 'colour' | 'scene' | 'music'): Promise<boolean> {
     this.mode = mode
     this.emitState()

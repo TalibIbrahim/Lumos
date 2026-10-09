@@ -29,6 +29,8 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  include: build/installer.nsh
+  deleteAppDataOnUninstall: false
 publish:
   provider: github
   owner: TalibIbrahim

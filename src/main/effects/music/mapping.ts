@@ -115,3 +115,37 @@ export function partyColor(palette: HueSat[], step: number, index: number, wave:
   const i = (step + (wave ? index : 0)) % palette.length
   return palette[(i + palette.length) % palette.length]
 }
+
+/**
+ * Bass envelope: for bass hits and sub-bass groove.
+ * Attack is smooth (120 ms) and decay is long and gentle (tau = 450..900 ms)
+ * so changes feel organic, rolling, and calm rather than frantic.
+ */
+export function bassEnvelope(msSinceBeat: number, strength: number, tempo: number | null): number {
+  if (msSinceBeat < 0) return 0
+  const attack = 120
+  if (msSinceBeat < attack) return strength * (msSinceBeat / attack)
+  const interval = tempo ? 60000 / tempo : 600
+  const tau = clamp(interval * 0.75, 450, 900)
+  return strength * Math.exp(-(msSinceBeat - attack) / tau)
+}
+
+/**
+ * Bass brightness: primarily driven by low-band energy (sub-bass).
+ * On beat drops (isDropBurst), brightness surges to 100% MAX.
+ * In normal play, changes are gentle, rolling, and weighted by sub-bass energy.
+ */
+export function bassBrightness(
+  baseLevel: number,
+  low: number,
+  pulse: number,
+  depth: number,
+  isDropBurst: boolean
+): number {
+  if (isDropBurst) return 100
+  const d = clamp(depth, 0, 1)
+  const floor = baseLevel * (1 - d * 0.45)
+  const peak = Math.min(100, Math.max(baseLevel, 60) + d * (100 - baseLevel))
+  const bassDrive = clamp(low * 0.75 + pulse * 0.25, 0, 1)
+  return clamp(lerp(floor, peak, bassDrive), 1, 100)
+}

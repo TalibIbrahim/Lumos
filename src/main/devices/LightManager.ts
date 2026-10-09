@@ -217,6 +217,21 @@ export class LightManager {
     return light.setColor(h, s, v)
   }
 
+  public async applyPresetState(
+    id: string,
+    params: {
+      power?: boolean
+      mode: 'white' | 'colour'
+      brightness: number
+      colorTemp?: number
+      color?: { h: number; s: number; v?: number }
+    }
+  ): Promise<boolean> {
+    const light = this.lights.get(id)
+    if (!light) return false
+    return light.applyPresetState(params)
+  }
+
   public async setWorkMode(id: string, mode: 'white' | 'colour' | 'scene' | 'music'): Promise<boolean> {
     const light = this.lights.get(id)
     if (!light) return false

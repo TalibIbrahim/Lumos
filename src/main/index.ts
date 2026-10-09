@@ -19,6 +19,10 @@ import { RemoteManager } from './remote/RemoteManager'
 import { setupRemoteIPC } from './remote/remoteIpc'
 import { isForwarding } from './remote/registry'
 
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.lumos.app')
+}
+
 let mainWindow: BrowserWindow | null = null
 let lightManager: LightManager | null = null
 let effectManager: EffectManager | null = null
@@ -198,7 +202,7 @@ app.whenReady().then(async () => {
   void remoteManager.start()
 
   // Setup Auto-Updater
-  setupAutoUpdater(() => mainWindow)
+  setupAutoUpdater(() => mainWindow, () => performCleanup())
 
   // Start local Webhook server
   webhookServer.start(lightManager)
@@ -249,6 +253,27 @@ app.whenReady().then(async () => {
   })
 })
 
+async function performCleanup(): Promise<void> {
+  if (cleanupDone) return
+  try {
+    await Promise.race([
+      effectManager?.shutdown(),
+      new Promise((resolve) => setTimeout(resolve, 1500))
+    ])
+  } catch (err) {
+    console.warn('[Lumos] Error stopping effects:', err)
+  }
+  energyTracker?.stop()
+  remoteManager?.stop()
+  lumosStore.destroy()
+  webhookServer.stop()
+  homeKitManager.stop()
+  if (lightManager) {
+    lightManager.disconnectAll()
+  }
+  cleanupDone = true
+}
+
 app.on('before-quit', (event) => {
   isQuitting = true
   if (cleanupDone) return
@@ -257,23 +282,7 @@ app.on('before-quit', (event) => {
   // connections close, so no light is left showing an effect.
   event.preventDefault()
   void (async () => {
-    try {
-      await Promise.race([
-        effectManager?.shutdown(),
-        new Promise((resolve) => setTimeout(resolve, 1500))
-      ])
-    } catch (err) {
-      console.warn('[Lumos] Error stopping effects:', err)
-    }
-    energyTracker?.stop()
-    remoteManager?.stop()
-    lumosStore.destroy()
-    webhookServer.stop()
-    homeKitManager.stop()
-    if (lightManager) {
-      lightManager.disconnectAll()
-    }
-    cleanupDone = true
+    await performCleanup()
     app.quit()
   })()
 })

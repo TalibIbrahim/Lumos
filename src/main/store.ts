@@ -295,20 +295,23 @@ export class LumosStore {
     if (!preset || !this.lightManager) return false
 
     const targetLights = this.resolveTargetLights(targetType, targetId)
-    for (const light of targetLights) {
-      if (!light.isConnected && !light.isDemo) continue
-      try {
-        await light.setPower(true)
-        await light.setBrightness(preset.brightness)
-        if (preset.mode === 'colour' && preset.color && light.capabilities.hasColor) {
-          await light.setColor(preset.color.h, preset.color.s, preset.color.v)
-        } else {
-          await light.setColorTemp(preset.colorTemp)
-        }
-      } catch (err) {
-        console.error(`[Lumos Store] Error applying preset ${preset.name} to light ${light.name}:`, err)
-      }
-    }
+    await Promise.all(
+      targetLights
+        .filter((light) => light.isConnected || light.isDemo)
+        .map(async (light) => {
+          try {
+            await light.applyPresetState({
+              power: true,
+              mode: preset.mode,
+              brightness: preset.brightness,
+              colorTemp: preset.colorTemp,
+              color: preset.color
+            })
+          } catch (err) {
+            console.error(`[Lumos Store] Error applying preset ${preset.name} to light ${light.name}:`, err)
+          }
+        })
+    )
     return true
   }
 

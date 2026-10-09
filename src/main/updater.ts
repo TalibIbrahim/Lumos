@@ -68,7 +68,10 @@ function createFileLogger(): {
   }
 }
 
-export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): void {
+export function setupAutoUpdater(
+  getMainWindow: () => BrowserWindow | null,
+  onBeforeInstall?: () => Promise<void>
+): void {
   const log = createFileLogger()
 
   // The updater library takes a noticeable time to load, so it loads on first use
@@ -93,8 +96,18 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     }
   }
 
-  const install = (): void => {
+  let isInstalling = false
+  const install = async (): Promise<void> => {
+    if (isInstalling) return
+    isInstalling = true
     log.info('Installing update and restarting')
+    if (onBeforeInstall) {
+      try {
+        await onBeforeInstall()
+      } catch (err) {
+        log.warn('Cleanup before update install failed:', err)
+      }
+    }
     // Silent install, then relaunch. An install for all users still shows the Windows permission prompt.
     getUpdater().quitAndInstall(true, true)
   }
@@ -147,7 +160,7 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     autoUpdater.on('update-downloaded', (info) => {
       log.info(`Update ${info.version} downloaded and ready to install`)
       broadcastStatus({ state: 'downloaded', version: info.version })
-      setTrayUpdateReady(info.version, install)
+      setTrayUpdateReady(info.version, () => void install())
 
       // The in-app notice covers an open window; a system notification covers the tray
       const win = getMainWindow()
@@ -199,8 +212,8 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     }
   })
 
-  ipcMain.handle('install-update', () => {
-    install()
+  ipcMain.handle('install-update', async () => {
+    await install()
   })
 
   ipcMain.handle('get-app-version', () => {

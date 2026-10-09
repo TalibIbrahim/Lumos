@@ -6,6 +6,8 @@ import { AlbumEffect } from './album/AlbumEffect'
 import { createWorkerExtractor } from './album/extractor'
 import { AwayEffect } from './away/AwayEffect'
 import { GamesEffect } from './games/GamesEffect'
+import { ColorCycleEffect } from './cycle/ColorCycleEffect'
+import { FireplaceEffect } from './fireplace/FireplaceEffect'
 import { ScreenSyncEffect } from './screen/ScreenSyncEffect'
 import { DisplayScreenSource, SampleScreenSource } from './screen/source'
 import { systemMonitor } from '../system/systemMonitor'
@@ -32,6 +34,13 @@ export function registerEffects(manager: EffectManager): void {
     )
   )
   manager.register(new AlbumEffect(host, systemMonitor, extractor.extract))
+  manager.register(new ColorCycleEffect(host))
+  manager.register(
+    new FireplaceEffect(
+      host,
+      (demo) => (demo ? new SimulatedMusicSource() : new LoopbackMusicSource())
+    )
+  )
   manager.register(new AwayEffect(host, powerMonitor, systemMonitor))
   manager.register(new GamesEffect(host))
 

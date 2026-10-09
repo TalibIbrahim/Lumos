@@ -247,4 +247,36 @@ describe('Bulb protection', () => {
     await light.setBrightness(60)
     expect(set).toHaveBeenCalledTimes(2)
   })
+
+  it('atomically sets brightness, colorTemp, and mode via applyPresetState', async () => {
+    const light = new Light(device)
+    light.isConnected = true
+    // Simulate previous state where user set brightness to 100% in white mode
+    await light.setBrightness(100)
+
+    const set = vi.fn(async () => true)
+    // @ts-expect-error mock tuya client
+    light['tuya'] = { set }
+
+    await light.applyPresetState({
+      power: true,
+      mode: 'white',
+      brightness: 5,
+      colorTemp: 0
+    })
+
+    expect(light.brightness).toBe(5)
+    expect(light.colorTemp).toBe(0)
+    expect(light.mode).toBe('white')
+    expect(light.power).toBe(true)
+
+    expect(set).toHaveBeenCalledTimes(1)
+    const callArg = set.mock.calls[0][0]
+    expect(callArg.multiple).toBe(true)
+    // In device mapping: 20 is power, 21 is mode, 22 is brightness, 23 is colorTemp
+    expect(callArg.data['20']).toBe(true)
+    expect(callArg.data['21']).toBe('white')
+    expect(callArg.data['22']).toBe(light.normalizeBrightness(5))
+    expect(callArg.data['23']).toBe(light.normalizeColorTemp(0))
+  })
 })

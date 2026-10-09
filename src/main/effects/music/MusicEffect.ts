@@ -10,6 +10,8 @@ import {
   DROP_SECTION_MS,
   PALETTES,
   PaletteName,
+  bassBrightness,
+  bassEnvelope,
   driftRate,
   paletteColor,
   partyBrightness,
@@ -19,8 +21,8 @@ import {
   pulseEnvelope
 } from './mapping'
 
-/** Smooth drifts and pulses gently; party snaps to the beat and goes full bright on drops. */
-export type MusicStyle = 'smooth' | 'party'
+/** Smooth drifts and pulses gently; party snaps to the beat; bass rolls with sub-bass and surges to MAX on drops. */
+export type MusicStyle = 'smooth' | 'party' | 'bass'
 
 export interface MusicSettings extends EffectSettingsBase {
   style: MusicStyle
@@ -108,7 +110,7 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
     return {
       enabled: bool(o.enabled, false),
       targets: targets(o.targets),
-      style: oneOf(o.style, ['smooth', 'party'] as const, d.style),
+      style: oneOf(o.style, ['smooth', 'party', 'bass'] as const, d.style),
       sensitivity: int(o.sensitivity, d.sensitivity, 0, 100),
       palette: oneOf(o.palette, ['aurora', 'sunset', 'ocean', 'neon', 'custom'] as const, d.palette),
       customColors: custom.length >= 2 ? custom : d.customColors,
@@ -213,6 +215,7 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
     const now = ctx.now
     this.advance(now)
     if (this.settings.style === 'party') return this.composeParty(below, ctx)
+    if (this.settings.style === 'bass') return this.composeBass(below, ctx)
 
     const depth = (this.settings.pulseDepth / 100) * (ctx.reduceIntensity ? 0.5 : 1)
     const pulse = pulseEnvelope(now - this.lastBeatAt, this.beatStrength, this.features.tempo)
@@ -253,11 +256,34 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
     return { ...asAdjustable(below), power: true, mode: 'colour', h: colour.h, s: colour.s, brightness }
   }
 
+  private composeBass(below: LightOutput, ctx: ComposeContext): LightOutput {
+    const now = ctx.now
+    const features = this.features!
+    const sinceDrop = now - this.lastDropAt
+    const isDropBurst = sinceDrop >= 0 && sinceDrop < DROP_BURST_MS
+
+    const depth = (this.settings.pulseDepth / 100) * (ctx.reduceIntensity ? 0.5 : 1)
+    const pulse = bassEnvelope(now - this.lastBeatAt, this.beatStrength, features.tempo)
+    const brightness = bassBrightness(luminance(below), features.low, pulse, depth, isDropBurst && !ctx.reduceIntensity)
+
+    const fromAlbum = below.mode === 'colour' && !outputsEqual(below, ctx.base)
+    let colour: HueSat
+    if (fromAlbum) {
+      colour = { h: below.h, s: below.s }
+    } else {
+      const palette = this.settings.palette === 'custom' ? this.settings.customColors : PALETTES[this.settings.palette]
+      const offset = this.settings.wave && ctx.count > 1 ? (ctx.index / ctx.count) * 0.5 : 0
+      colour = paletteColor(palette, this.position + offset)
+    }
+    return { ...asAdjustable(below), power: true, mode: 'colour', h: colour.h, s: colour.s, brightness }
+  }
+
   private advance(now: number): void {
     if (now <= this.lastAdvance) return
     const dt = (now - this.lastAdvance) / 1000
     this.lastAdvance = now
-    this.position = (this.position + dt * driftRate(this.settings.driftSpeed / 100, this.features?.energy ?? 0.5)) % 1
+    const energy = this.settings.style === 'bass' ? (this.features?.low ?? 0.5) * 0.7 : (this.features?.energy ?? 0.5)
+    this.position = (this.position + dt * driftRate(this.settings.driftSpeed / 100, energy)) % 1
   }
 
   protected info(): Record<string, unknown> {

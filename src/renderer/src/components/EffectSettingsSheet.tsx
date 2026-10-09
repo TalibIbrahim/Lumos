@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Music2, AlertTriangle, FolderCog, RotateCcw, Play, CheckCircle2, Loader2 } from 'lucide-react'
+import { Music2, AlertTriangle, FolderCog, RotateCcw, Play, CheckCircle2, Loader2, Sparkles, Check } from 'lucide-react'
 import { GlassButton } from './ui/GlassButton'
 import {
   GlassSheet,
@@ -15,6 +15,7 @@ import {
   swatchCss
 } from './ui/SettingsControls'
 import { EFFECT_ICONS } from '../lib/effectIcons'
+import { EFFECT_PRESETS } from '../lib/effectPresets'
 import { ScreenSyncSettings } from './ScreenSyncSettings'
 import { EffectSnapshotData, NormalizedLightState } from '../types'
 
@@ -35,9 +36,11 @@ export interface EffectSettingsSheetProps {
 export const EffectSettingsSheet: React.FC<EffectSettingsSheetProps> = ({ effect, lights, isDemoMode, onClose, onToggle }) => {
   const api = window.lumos
   const [draft, setDraft] = useState<Settings | null>(null)
+  const [justApplied, setJustApplied] = useState(false)
   const pending = useRef<Record<string, unknown>>({})
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const effectId = effect?.id
+  const preset = effect ? EFFECT_PRESETS[effect.id] : null
 
   // Take the latest settings from the app unless a change is on its way
   useEffect(() => {
@@ -68,6 +71,17 @@ export const EffectSettingsSheet: React.FC<EffectSettingsSheetProps> = ({ effect
     [flush]
   )
 
+  const applyPreset = useCallback(() => {
+    if (!effect || !preset) return
+    patch(preset.settings)
+    flush()
+    if (!effect.settings.enabled) {
+      onToggle(effect.id, true)
+    }
+    setJustApplied(true)
+    setTimeout(() => setJustApplied(false), 2500)
+  }, [effect, preset, patch, flush, onToggle])
+
   const close = (): void => {
     flush()
     onClose()
@@ -88,6 +102,41 @@ export const EffectSettingsSheet: React.FC<EffectSettingsSheetProps> = ({ effect
             <ToggleButton on={effect.settings.enabled} onChange={(on) => onToggle(effect.id, on)} ariaLabel={`${effect.label} on or off`} />
           </div>
 
+          {preset && (
+            <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-amber-400/[0.08] border border-amber-400/25">
+              <div className="min-w-0 flex-1 pr-2">
+                <div className="flex items-center gap-2 text-xs font-semibold text-amber-300">
+                  <Sparkles className="w-4 h-4 flex-shrink-0 text-amber-300" />
+                  <span>{preset.name}</span>
+                  <span className="text-[10px] font-medium text-amber-300/90 bg-amber-400/15 px-2 py-0.5 rounded-full border border-amber-400/30">
+                    {preset.badge}
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-300 mt-1 leading-relaxed">
+                  {preset.description}
+                </p>
+              </div>
+              <GlassButton
+                variant="prominent"
+                size="sm"
+                onClick={applyPreset}
+                aria-label={`Run ${preset.name} preset`}
+              >
+                {justApplied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-300" />
+                    <span>Applied</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>{effect.settings.enabled ? 'Best settings' : 'Run preset'}</span>
+                  </>
+                )}
+              </GlassButton>
+            </div>
+          )}
+
           {effect.status === 'error' && (
             <div role="alert" className="flex items-start gap-2.5 rounded-xl bg-rose-500/10 border border-rose-400/20 px-3 py-2.5 text-[11px] text-rose-200">
               <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-px" />
@@ -98,6 +147,8 @@ export const EffectSettingsSheet: React.FC<EffectSettingsSheetProps> = ({ effect
           {effect.id === 'screen' && <ScreenSyncSettings s={s} patch={patch} effect={effect} lights={lights} isDemoMode={isDemoMode} />}
           {effect.id === 'music' && <MusicSettings s={s} patch={patch} effect={effect} />}
           {effect.id === 'album' && <AlbumSettings s={s} patch={patch} effect={effect} isDemoMode={isDemoMode} />}
+          {effect.id === 'cycle' && <ColorCycleSettings s={s} patch={patch} />}
+          {effect.id === 'fireplace' && <FireplaceSettings s={s} patch={patch} />}
           {effect.id === 'away' && <AwaySettings s={s} patch={patch} effect={effect} isDemoMode={isDemoMode} />}
           {effect.id === 'games' && <GamesSettings s={s} patch={patch} effect={effect} isDemoMode={isDemoMode} />}
 
@@ -177,7 +228,9 @@ const MusicSettings: React.FC<SectionProps> = ({ s, patch, effect }) => {
         footer={
           s.style === 'party'
             ? 'Lights snap to each beat, step to the next colour, and go full white for a moment when the beat drops. Every beat after a drop hits full brightness for a while. The flash limit still applies.'
-            : 'Lights pulse gently with the beat while the colours drift slowly.'
+            : s.style === 'bass'
+              ? 'Sub-bass focus: lights roll with the bassline through slow gentle changes and surge to MAX brightness when the beat drops.'
+              : 'Lights pulse gently with the beat while the colours drift slowly.'
         }
       >
         <Row label="Style">
@@ -186,7 +239,8 @@ const MusicSettings: React.FC<SectionProps> = ({ s, patch, effect }) => {
             value={s.style}
             options={[
               { value: 'smooth', label: 'Smooth' },
-              { value: 'party', label: 'Party' }
+              { value: 'party', label: 'Party' },
+              { value: 'bass', label: 'Bass Drop' }
             ]}
             onChange={(v) => patch({ style: v })}
           />
@@ -267,7 +321,7 @@ const MusicSettings: React.FC<SectionProps> = ({ s, patch, effect }) => {
       <Group title="Pulse" footer="When Album color is also on, the album colour is used and Music adds the pulses.">
         <Row
           label="Pulse strength"
-          hint={s.style === 'party' ? 'How dark the lights go between beats.' : 'How far brightness moves on each beat.'}
+          hint={s.style === 'party' ? 'How dark the lights go between beats.' : s.style === 'bass' ? 'How deep the sub-bass pulse travels.' : 'How far brightness moves on each beat.'}
           stacked
         >
           <RangeControl ariaLabel="Pulse strength" value={s.pulseDepth} min={0} max={100} onChange={(v) => patch({ pulseDepth: v })} format={(v) => `${v}%`} />
@@ -333,6 +387,128 @@ const AlbumSettings: React.FC<SectionProps> = ({ s, patch, effect, isDemoMode })
           </Row>
         </Group>
       )}
+    </>
+  )
+}
+
+// --- Chroma Cycle ---
+
+const ColorCycleSettings: React.FC<{ s: Settings; patch: (p: Record<string, unknown>) => void }> = ({ s, patch }) => {
+  return (
+    <>
+      <Group title="Cycle speed" footer="Controls how long it takes to travel through the full 360° color wheel.">
+        <Row label="Cycle time" hint="Lower is faster, higher is a slow ambient drift." stacked>
+          <RangeControl
+            ariaLabel="Cycle time"
+            value={Number(s.speed ?? 60)}
+            min={10}
+            max={300}
+            step={5}
+            onChange={(v) => patch({ speed: v })}
+            format={(v) => `${v}s`}
+          />
+        </Row>
+      </Group>
+
+      <Group title="Color & Light">
+        <Row label="Brightness" stacked>
+          <RangeControl
+            ariaLabel="Brightness"
+            value={Number(s.brightness ?? 100)}
+            min={1}
+            max={100}
+            onChange={(v) => patch({ brightness: v })}
+            format={(v) => `${v}%`}
+          />
+        </Row>
+        <Row label="Saturation" hint="Lower values produce soft pastels, higher values give vibrant pure hues." stacked>
+          <RangeControl
+            ariaLabel="Saturation"
+            value={Number(s.saturation ?? 100)}
+            min={1}
+            max={100}
+            onChange={(v) => patch({ saturation: v })}
+            format={(v) => `${v}%`}
+          />
+        </Row>
+      </Group>
+
+      <Group title="Motion">
+        <Row
+          label="Spectrum wave"
+          hint="Offsets the colors across lights so they form a continuous rainbow across the room."
+        >
+          <ToggleButton
+            on={Boolean(s.wave ?? true)}
+            onChange={(on) => patch({ wave: on })}
+            ariaLabel="Spectrum wave"
+          />
+        </Row>
+        <Row
+          label="Reverse direction"
+          hint="Cycles backwards through the spectrum (from red toward violet)."
+        >
+          <ToggleButton
+            on={Boolean(s.reverse ?? false)}
+            onChange={(on) => patch({ reverse: on })}
+            ariaLabel="Reverse direction"
+          />
+        </Row>
+      </Group>
+    </>
+  )
+}
+
+// --- Acoustic Fireplace ---
+
+const FireplaceSettings: React.FC<{ s: Settings; patch: (p: Record<string, unknown>) => void }> = ({ s, patch }) => {
+  return (
+    <>
+      <Group title="Flame & Embers" footer="Simulates living hearth embers and golden flickering flames.">
+        <Row label="Intensity" hint="Maximum brightness level of the fire." stacked>
+          <RangeControl
+            ariaLabel="Intensity"
+            value={Number(s.intensity ?? 80)}
+            min={10}
+            max={100}
+            onChange={(v) => patch({ intensity: v })}
+            format={(v) => `${v}%`}
+          />
+        </Row>
+        <Row label="Flame speed" hint="How fast the flames flicker and embers breathe." stacked>
+          <RangeControl
+            ariaLabel="Flame speed"
+            value={Number(s.flameSpeed ?? 50)}
+            min={10}
+            max={100}
+            onChange={(v) => patch({ flameSpeed: v })}
+            format={(v) => `${v}%`}
+          />
+        </Row>
+      </Group>
+
+      <Group title="Reactivity">
+        <Row
+          label="Acoustic reactivity"
+          hint="Flames crackle and flare up with low-end bass and audio swells when music plays on this computer."
+        >
+          <ToggleButton
+            on={Boolean(s.acoustic ?? true)}
+            onChange={(on) => patch({ acoustic: on })}
+            ariaLabel="Acoustic reactivity"
+          />
+        </Row>
+        <Row
+          label="Multi-light hearth"
+          hint="Offsets flame flicker across lights so each dances independently like different sides of a fireplace."
+        >
+          <ToggleButton
+            on={Boolean(s.wave ?? true)}
+            onChange={(on) => patch({ wave: on })}
+            ariaLabel="Multi-light hearth"
+          />
+        </Row>
+      </Group>
     </>
   )
 }
