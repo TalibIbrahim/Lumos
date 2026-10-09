@@ -1,4 +1,4 @@
-import { clamp, lerp } from '../output'
+import { clamp, lerp, lerpHue } from '../output'
 
 export interface FlameParams {
   heat: number // 0..1, flame core temperature (drives hue: 14° ember to 38° bright gold)
@@ -10,26 +10,26 @@ export const MAX_FLAME_HUE = 38 // golden flame
 
 /**
  * Procedural harmonic multi-octave oscillation simulating organic flame motion.
- * Combines slow breathing (embers), medium licking flames, and fast micro-crackles.
+ * Combines slow breathing (embers), dancing flame tongues, and gentle ember shimmer.
  */
 export function flameFlicker(nowMs: number, speed: number, phase: number): FlameParams {
   const s = clamp(speed, 10, 100) / 50 // 0.2 to 2.0x time rate
   const t = (nowMs / 1000) * s + phase
 
-  // Octave 1: Slow underlying hearth breathing (0.35 Hz)
-  const o1 = 0.5 + 0.5 * Math.sin(t * 2.2)
+  // Octave 1: Slow underlying hearth breathing (~0.22 Hz)
+  const o1 = 0.5 + 0.5 * Math.sin(t * 1.4)
 
-  // Octave 2: Mid-frequency flame tongues (1.1 Hz)
-  const o2 = 0.5 + 0.5 * Math.sin(t * 6.9 + 1.2)
+  // Octave 2: Mid-frequency dancing flame tongues (~0.57 Hz)
+  const o2 = 0.5 + 0.5 * Math.sin(t * 3.6 + 1.2)
 
-  // Octave 3: Faster micro-flicker (2.7 Hz)
-  const o3 = 0.5 + 0.5 * Math.sin(t * 17.1 + 2.8)
+  // Octave 3: Gentle ember shimmer (~1.08 Hz)
+  const o3 = 0.5 + 0.5 * Math.sin(t * 6.8 + 2.5)
 
-  // Combined heat: biased towards embers with periodic rises
-  const heat = clamp(0.25 * o1 + 0.45 * o2 + 0.3 * o3, 0, 1)
+  // Combined heat: biased towards glowing embers with organic flame rises
+  const heat = clamp(0.40 * o1 + 0.50 * o2 + 0.10 * o3, 0, 1)
 
   // Combined flicker for brightness (gentle range 0.4..1.0 so light never cuts out)
-  const flicker = clamp(0.4 + 0.35 * o2 + 0.25 * o3, 0.2, 1.0)
+  const flicker = clamp(0.45 + 0.45 * o2 + 0.10 * o3, 0.2, 1.0)
 
   return { heat, flicker }
 }
@@ -70,4 +70,58 @@ export function fireplaceOutput(
   const brightness = Math.round(clamp(lerp(floor, peak, clamp(params.flicker + flare, 0, 1)), 5, 100))
 
   return { h, s, brightness }
+}
+
+/**
+ * Continuous thermal smoother for fireplace lighting.
+ * Simulates the physical thermal mass and inertia of glowing embers and hot wood,
+ * ensuring changes in flame temperature and brightness glide smoothly across frames.
+ */
+export class FireSmoother {
+  private currentH: number | null = null
+  private currentS: number | null = null
+  private currentBri: number | null = null
+  private lastAt = 0
+
+  public update(
+    target: { h: number; s: number; brightness: number },
+    now: number
+  ): { h: number; s: number; brightness: number } {
+    if (this.currentBri === null || this.lastAt === 0) {
+      this.currentBri = target.brightness
+      this.currentH = target.h
+      this.currentS = target.s
+      this.lastAt = now
+      return target
+    }
+    const dt = Math.max(0, Math.min(1.0, (now - this.lastAt) / 1000))
+    this.lastAt = now
+    if (dt === 0) {
+      return {
+        h: Math.round(this.currentH!),
+        s: Math.round(this.currentS!),
+        brightness: Math.round(this.currentBri)
+      }
+    }
+
+    // Thermal inertia of the hearth: smooth exponential relaxation (tau = 180ms)
+    const tau = 0.18
+    const a = 1 - Math.exp(-dt / tau)
+    this.currentH = lerpHue(this.currentH!, target.h, a)
+    this.currentS = lerp(this.currentS!, target.s, a)
+    this.currentBri = lerp(this.currentBri, target.brightness, a)
+
+    return {
+      h: Math.round(((this.currentH % 360) + 360) % 360),
+      s: Math.round(clamp(this.currentS, 0, 100)),
+      brightness: Math.round(clamp(this.currentBri, 1, 100))
+    }
+  }
+
+  public reset(): void {
+    this.currentH = null
+    this.currentS = null
+    this.currentBri = null
+    this.lastAt = 0
+  }
 }

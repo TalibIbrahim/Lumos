@@ -8,6 +8,8 @@ import type { MusicSource } from './capture'
 import {
   DROP_BURST_MS,
   DROP_SECTION_MS,
+  MusicSmoother,
+  MusicStyle,
   PALETTES,
   PaletteName,
   bassBrightness,
@@ -21,8 +23,7 @@ import {
   pulseEnvelope
 } from './mapping'
 
-/** Smooth drifts and pulses gently; party snaps to the beat; bass rolls with sub-bass and surges to MAX on drops. */
-export type MusicStyle = 'smooth' | 'party' | 'bass'
+export type { MusicStyle }
 
 export interface MusicSettings extends EffectSettingsBase {
   style: MusicStyle
@@ -70,6 +71,8 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
   private quiet = true
   private meterUntil = 0
   private lastMeterAt = 0
+  private smoothers = new Map<string, MusicSmoother>()
+  private smoothedLow = 0
 
   constructor(
     host: EffectHost,
@@ -135,6 +138,8 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
     this.beatCount = 0
     this.lastDropAt = -Infinity
     this.lastAdvance = this.clock()
+    this.smoothers.clear()
+    this.smoothedLow = 0
     const source = this.createSource(this.host.isDemo())
     this.source = source
     source.on('features', (f: MusicFeatures) => this.onFeatures(f))
@@ -142,7 +147,7 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
       if (s.state === 'error') this.setStatus('error', s.message || 'Audio capture failed')
       else if (this.quiet) this.setStatus('waiting', 'Listening for music')
     })
-    this.host.compositor.addLayer(this)
+    this.host.compositor.addLayer(this, RESUME_FADE_MS)
     this.setStatus('waiting', 'Starting audio analysis')
     source.start(this.captureConfig())
   }
@@ -151,6 +156,7 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
     this.source?.stop()
     this.source?.removeAllListeners()
     this.source = null
+    this.smoothers.clear()
     const wasPlaying = !this.quiet
     this.quiet = true
     this.host.compositor.removeLayer(this.id, wasPlaying ? PAUSE_FADE_MS : 0)
@@ -158,7 +164,7 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
 
   protected onSettingsChanged(): void {
     this.source?.configure(this.captureConfig())
-    this.host.compositor.invalidate(this.targetIds())
+    this.host.compositor.invalidate(this.targetIds(), 600)
   }
 
   private targetIds(): string[] {
@@ -169,6 +175,7 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
     if (!this.running) return
     const now = this.clock()
     this.features = f
+    this.smoothedLow = this.smoothedLow * 0.75 + f.low * 0.25
     if (f.beat) {
       this.lastBeatAt = now
       this.beatStrength = Math.max(0.35, f.beatStrength)
@@ -180,6 +187,7 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
       if (this.silentSince === null) this.silentSince = now
       if (!this.quiet && now - this.silentSince >= this.settings.silenceSeconds * 1000) {
         this.quiet = true
+        this.smoothers.clear()
         this.host.compositor.invalidate(this.targetIds(), PAUSE_FADE_MS)
         this.setStatus('waiting', 'Paused while nothing is playing')
       }
@@ -187,6 +195,7 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
       this.silentSince = null
       if (this.quiet) {
         this.quiet = false
+        this.smoothers.clear()
         this.lastAdvance = now
         this.host.compositor.invalidate(this.targetIds(), RESUME_FADE_MS)
         this.host.compositor.wake()
@@ -219,7 +228,7 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
 
     const depth = (this.settings.pulseDepth / 100) * (ctx.reduceIntensity ? 0.5 : 1)
     const pulse = pulseEnvelope(now - this.lastBeatAt, this.beatStrength, this.features.tempo)
-    const brightness = pulseBrightness(luminance(below), pulse, this.features.low, depth)
+    const rawBri = pulseBrightness(luminance(below), pulse, this.smoothedLow, depth)
 
     // Album colour (a colour layer underneath) supplies the hue; otherwise drift the palette.
     const fromAlbum = below.mode === 'colour' && !outputsEqual(below, ctx.base)
@@ -231,7 +240,15 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
       const offset = this.settings.wave && ctx.count > 1 ? (ctx.index / ctx.count) * 0.5 : 0
       colour = paletteColor(palette, this.position + offset)
     }
-    return { ...asAdjustable(below), power: true, mode: 'colour', h: colour.h, s: colour.s, brightness }
+
+    let smoother = this.smoothers.get(ctx.lightId)
+    if (!smoother) {
+      smoother = new MusicSmoother()
+      this.smoothers.set(ctx.lightId, smoother)
+    }
+    const smoothed = smoother.update({ h: colour.h, s: colour.s, brightness: rawBri }, now, 'smooth')
+
+    return { ...asAdjustable(below), power: true, mode: 'colour', h: smoothed.h, s: smoothed.s, brightness: smoothed.brightness }
   }
 
   private composeParty(below: LightOutput, ctx: ComposeContext): LightOutput {
@@ -240,20 +257,29 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
     const sinceDrop = now - this.lastDropAt
     // The drop itself: every light at full white for a moment (skipped when intensity is reduced)
     if (sinceDrop >= 0 && sinceDrop < DROP_BURST_MS && !ctx.reduceIntensity) {
+      this.smoothers.get(ctx.lightId)?.reset()
       return { ...asAdjustable(below), power: true, mode: 'white', brightness: 100, colorTemp: 100, scene: undefined }
     }
     const afterDrop = sinceDrop >= 0 && sinceDrop < DROP_SECTION_MS
     const depth = (this.settings.pulseDepth / 100) * (ctx.reduceIntensity ? 0.5 : 1)
     const pulse = partyEnvelope(now - this.lastBeatAt, this.beatStrength, features.tempo, afterDrop)
     // Party mode always swings to full, so the depth sets how dark it gets between beats
-    const brightness = partyBrightness(luminance(below) || 100, pulse, features.low, 0.5 + depth * 0.5)
+    const rawBri = partyBrightness(luminance(below) || 100, pulse, this.smoothedLow, 0.5 + depth * 0.5)
 
     const fromAlbum = below.mode === 'colour' && !outputsEqual(below, ctx.base)
     const palette = this.settings.palette === 'custom' ? this.settings.customColors : PALETTES[this.settings.palette]
     const colour = fromAlbum
       ? { h: below.h, s: below.s }
       : partyColor(palette, this.beatCount, ctx.count > 1 ? ctx.index : 0, this.settings.wave)
-    return { ...asAdjustable(below), power: true, mode: 'colour', h: colour.h, s: colour.s, brightness }
+
+    let smoother = this.smoothers.get(ctx.lightId)
+    if (!smoother) {
+      smoother = new MusicSmoother()
+      this.smoothers.set(ctx.lightId, smoother)
+    }
+    const smoothed = smoother.update({ h: colour.h, s: colour.s, brightness: rawBri }, now, 'party')
+
+    return { ...asAdjustable(below), power: true, mode: 'colour', h: smoothed.h, s: smoothed.s, brightness: smoothed.brightness }
   }
 
   private composeBass(below: LightOutput, ctx: ComposeContext): LightOutput {
@@ -262,9 +288,13 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
     const sinceDrop = now - this.lastDropAt
     const isDropBurst = sinceDrop >= 0 && sinceDrop < DROP_BURST_MS
 
+    if (isDropBurst && !ctx.reduceIntensity) {
+      this.smoothers.get(ctx.lightId)?.reset()
+    }
+
     const depth = (this.settings.pulseDepth / 100) * (ctx.reduceIntensity ? 0.5 : 1)
     const pulse = bassEnvelope(now - this.lastBeatAt, this.beatStrength, features.tempo)
-    const brightness = bassBrightness(luminance(below), features.low, pulse, depth, isDropBurst && !ctx.reduceIntensity)
+    const rawBri = bassBrightness(luminance(below), this.smoothedLow, pulse, depth, isDropBurst && !ctx.reduceIntensity)
 
     const fromAlbum = below.mode === 'colour' && !outputsEqual(below, ctx.base)
     let colour: HueSat
@@ -275,7 +305,15 @@ export class MusicEffect extends Effect<MusicSettings> implements Layer {
       const offset = this.settings.wave && ctx.count > 1 ? (ctx.index / ctx.count) * 0.5 : 0
       colour = paletteColor(palette, this.position + offset)
     }
-    return { ...asAdjustable(below), power: true, mode: 'colour', h: colour.h, s: colour.s, brightness }
+
+    let smoother = this.smoothers.get(ctx.lightId)
+    if (!smoother) {
+      smoother = new MusicSmoother()
+      this.smoothers.set(ctx.lightId, smoother)
+    }
+    const smoothed = smoother.update({ h: colour.h, s: colour.s, brightness: rawBri }, now, 'bass')
+
+    return { ...asAdjustable(below), power: true, mode: 'colour', h: smoothed.h, s: smoothed.s, brightness: smoothed.brightness }
   }
 
   private advance(now: number): void {

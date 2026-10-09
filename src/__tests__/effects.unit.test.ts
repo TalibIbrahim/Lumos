@@ -24,10 +24,11 @@ import {
   partyEnvelope,
   pulseBrightness,
   pulseEnvelope,
-  PALETTES
+  PALETTES,
+  MusicSmoother
 } from '../main/effects/music/mapping'
-import { colorCycleHue } from '../main/effects/cycle/ColorCycleEffect'
-import { flameFlicker, fireplaceOutput, MIN_EMBER_HUE, MAX_FLAME_HUE } from '../main/effects/fireplace/fireLogic'
+import { colorCycleHue, CycleSmoother } from '../main/effects/cycle/ColorCycleEffect'
+import { flameFlicker, fireplaceOutput, MIN_EMBER_HUE, MAX_FLAME_HUE, FireSmoother } from '../main/effects/fireplace/fireLogic'
 import { parseHelperLine } from '../main/system/systemMonitor'
 import { sanitizeFeatures } from '../main/effects/music/features'
 import { LightOutput } from '../main/effects/output'
@@ -546,6 +547,60 @@ describe('Acoustic Fireplace: procedural flame and audio reactivity', () => {
     // Swell increases heat (more golden amber) and brightness
     expect(acousticSwell.h).toBeGreaterThan(calm.h)
     expect(acousticSwell.brightness).toBeGreaterThan(calm.brightness)
+  })
+})
+
+describe('Continuous temporal smoothing for gradual, step-free lighting', () => {
+  it('MusicSmoother rises along a continuous curve without jumping 25+ points in one frame', () => {
+    const s = new MusicSmoother()
+    // Initial frame establishes baseline at 20%
+    const f0 = s.update({ h: 200, s: 90, brightness: 20 }, 1000)
+    expect(f0.brightness).toBe(20)
+
+    // Beat hits: target jumps instantaneously by 60 points (to 80%)
+    let prev = f0.brightness
+    for (let t = 1033; t <= 1300; t += 33) {
+      const out = s.update({ h: 200, s: 90, brightness: 80 }, t, 'smooth')
+      const rise = out.brightness - prev
+      expect(rise).toBeLessThan(25) // Strictly never trips FLASH_RISE_THRESHOLD
+      expect(out.brightness).toBeGreaterThanOrEqual(prev) // Strictly smooth rise
+      prev = out.brightness
+    }
+    // Reaches near target within ~300ms
+    expect(prev).toBeGreaterThan(65)
+  })
+
+  it('MusicSmoother glides hue smoothly along the shortest arc on color changes', () => {
+    const s = new MusicSmoother()
+    s.update({ h: 350, s: 90, brightness: 50 }, 1000)
+    // Target jumps across 0° boundary to 20° (30° shortest arc)
+    const mid = s.update({ h: 20, s: 90, brightness: 50 }, 1050)
+    // Moves across 360/0 boundary smoothly without taking long path around 180°
+    expect(mid.h >= 350 || mid.h <= 20).toBe(true)
+  })
+
+  it('FireSmoother dampens thermal oscillations into gradual, organic curves', () => {
+    const s = new FireSmoother()
+    const f0 = s.update({ h: 16, s: 95, brightness: 30 }, 1000)
+    expect(f0.brightness).toBe(30)
+
+    // Flame flickers rapidly between extremes: smoother keeps frame deltas small
+    let prevBri = f0.brightness
+    for (let t = 1033; t <= 1200; t += 33) {
+      const targetBri = (t / 33) % 2 === 0 ? 80 : 30
+      const out = s.update({ h: 28, s: 95, brightness: targetBri }, t)
+      expect(Math.abs(out.brightness - prevBri)).toBeLessThan(20)
+      prevBri = out.brightness
+    }
+  })
+
+  it('CycleSmoother eliminates step changes across frames', () => {
+    const s = new CycleSmoother()
+    s.update({ h: 100, s: 100, brightness: 100 }, 1000)
+    // Instantaneous jump in target hue
+    const mid = s.update({ h: 140, s: 100, brightness: 100 }, 1033)
+    expect(mid.h).toBeGreaterThan(100)
+    expect(mid.h).toBeLessThan(140)
   })
 })
 

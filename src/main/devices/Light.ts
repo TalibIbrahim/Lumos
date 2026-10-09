@@ -217,6 +217,9 @@ export class Light extends EventEmitter {
           // be thrown as an uncaught exception, so keep a quiet one attached.
           // The attempt is left to time out on its own so anything awaiting it still settles.
           old.on('error', () => {})
+          if (old.client && typeof old.client.destroy === 'function') {
+            old.client.destroy(new Error('Connection replaced'))
+          }
           old.disconnect()
         } catch {
           // ignore disconnect error
@@ -238,6 +241,11 @@ export class Light extends EventEmitter {
 
       this.tuya = new TuyAPI(tuyaOptions)
 
+      // TuyAPI defaults _responseTimeout to 2s, which causes premature disconnects
+      // on 2.4GHz Wi-Fi jitter or normal bulb command latency. Give it 8s.
+      this.tuya._responseTimeout = 8
+      this.tuya._connectTimeout = 5
+
       this.tuya.on('connected', () => {
         console.log(`[Lumos Light ${this.name}] Connected (v${this.version}) to ${this.ip}!`)
         this.isConnected = true
@@ -254,13 +262,16 @@ export class Light extends EventEmitter {
           updatePersistedDeviceIp(this.id, this.ip)
         }
 
-        // Enable TCP_NODELAY to bypass Nagle algorithm latency
+        // Enable TCP_NODELAY to bypass Nagle algorithm latency, and TCP Keep-Alive
         try {
-          if (this.tuya?._client && typeof this.tuya._client.setNoDelay === 'function') {
-            this.tuya._client.setNoDelay(true)
-          }
-          if (this.tuya?._socket && typeof this.tuya._socket.setNoDelay === 'function') {
-            this.tuya._socket.setNoDelay(true)
+          const sock = this.tuya?.client
+          if (sock) {
+            if (typeof sock.setNoDelay === 'function') {
+              sock.setNoDelay(true)
+            }
+            if (typeof sock.setKeepAlive === 'function') {
+              sock.setKeepAlive(true, 5000)
+            }
           }
         } catch {
           // ignore socket flag error
@@ -310,6 +321,10 @@ export class Light extends EventEmitter {
       this.tuya.on('data', (data: any) => {
         this.hasReceivedData = true
         this.lastSeen = Date.now()
+        // If a heartbeat ping is awaiting a pong, incoming device data proves the socket is alive
+        if (this.tuya?._pingPongTimeout) {
+          this.tuya._lastPingAt = new Date()
+        }
         this.noteAck()
         this.handleTuyaData(data)
       })
@@ -318,6 +333,9 @@ export class Light extends EventEmitter {
       this.tuya.on('dp-refresh', (data: any) => {
         this.hasReceivedData = true
         this.lastSeen = Date.now()
+        if (this.tuya?._pingPongTimeout) {
+          this.tuya._lastPingAt = new Date()
+        }
         this.handleTuyaData(data)
       })
     } catch (err) {
@@ -1079,6 +1097,9 @@ export class Light extends EventEmitter {
     if (!this.isDemo) {
       try {
         if (this.tuya) {
+          if (this.tuya.client && typeof this.tuya.client.destroy === 'function') {
+            this.tuya.client.destroy()
+          }
           this.tuya.disconnect()
         }
       } catch {

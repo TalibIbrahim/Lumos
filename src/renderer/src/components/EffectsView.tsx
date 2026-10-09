@@ -222,9 +222,9 @@ const EffectCard: React.FC<{
 
         {preset && (
           <div className="mt-auto pt-2.5 flex items-center justify-between gap-2 border-t border-white/[0.04]">
-            <span className="text-[11px] text-zinc-400 flex items-center gap-1.5 truncate">
+            <span className="text-[11px] text-zinc-400 flex items-center gap-1.5 min-w-0">
               <Sparkles className="w-3.5 h-3.5 text-amber-400/80 flex-shrink-0" />
-              <span className="truncate">{preset.name}</span>
+              <span className="truncate text-zinc-300 font-medium">{preset.name}</span>
             </span>
             <GlassButton
               variant={isPresetApplied ? 'subtle' : on ? 'subtle' : 'standard'}
@@ -242,10 +242,7 @@ const EffectCard: React.FC<{
                   <span>Applied</span>
                 </>
               ) : (
-                <>
-                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                  <span>{on ? 'Best settings' : 'Run preset'}</span>
-                </>
+                <span>{on ? 'Best settings' : 'Run preset'}</span>
               )}
             </GlassButton>
           </div>

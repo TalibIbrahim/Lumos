@@ -128,10 +128,7 @@ export const EffectSettingsSheet: React.FC<EffectSettingsSheetProps> = ({ effect
                     <span>Applied</span>
                   </>
                 ) : (
-                  <>
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>{effect.settings.enabled ? 'Best settings' : 'Run preset'}</span>
-                  </>
+                  <span>{effect.settings.enabled ? 'Best settings' : 'Run preset'}</span>
                 )}
               </GlassButton>
             </div>

@@ -180,7 +180,12 @@ export function scanForTuyaPorts(prefixes = localPrefixes(), timeoutMs = 2000): 
   if (scanCache && Date.now() - scanCache.at < SCAN_CACHE_MS) return scanCache.result
   const result = (async () => {
     const targets: string[] = []
-    for (const p of prefixes) for (let i = 1; i <= 254; i++) targets.push(`${p}.${i}`)
+    for (const p of prefixes) {
+      for (let i = 1; i <= 254; i++) {
+        const ip = `${p}.${i}`
+        if (!claimed.has(ip)) targets.push(ip)
+      }
+    }
     const open: string[] = []
     // Bounded concurrency keeps the scan light on the network
     const BATCH = 128

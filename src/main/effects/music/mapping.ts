@@ -1,4 +1,5 @@
 import { clamp, lerp, lerpHue } from '../output'
+import { FLASH_RISE_THRESHOLD } from '../safety'
 import type { HueSat } from '../validate'
 
 export type PaletteName = 'aurora' | 'sunset' | 'ocean' | 'neon' | 'custom'
@@ -36,9 +37,8 @@ export function paletteColor(palette: HueSat[], position: number): HueSat {
   const t = scaled - i
   const a = palette[i % palette.length]
   const b = palette[(i + 1) % palette.length]
-  // Ease between stops so the drift lingers on each colour
-  const e = t * t * (3 - 2 * t)
-  return { h: lerpHue(a.h, b.h, e), s: lerp(a.s, b.s, e) }
+  // Uniform linear progression along the hue arc for constant, unnoticeable drift
+  return { h: lerpHue(a.h, b.h, t), s: lerp(a.s, b.s, t) }
 }
 
 /** Palette cycles per second for a drift setting (0..1) and track energy (0..1). */
@@ -47,14 +47,17 @@ export function driftRate(drift: number, energy: number): number {
 }
 
 /**
- * Beat pulse envelope at a time after a beat. Attack is short enough that the
- * peak lands on the bulb's next command; decay follows the tempo so pulses
- * at fast tempos still separate, but never so fast that it reads as a strobe.
+ * Beat pulse envelope at a time after a beat. Attack uses a smooth sinusoidal
+ * curve so changes rise organically into the peak; decay follows the tempo so
+ * pulses at fast tempos still separate without strobing.
  */
 export function pulseEnvelope(msSinceBeat: number, strength: number, tempo: number | null): number {
   if (msSinceBeat < 0) return 0
   const attack = 60
-  if (msSinceBeat < attack) return strength * (msSinceBeat / attack)
+  if (msSinceBeat < attack) {
+    const p = msSinceBeat / attack
+    return strength * (0.5 - 0.5 * Math.cos(Math.PI * p))
+  }
   const interval = tempo ? 60000 / tempo : 500
   const tau = clamp(interval * 0.35, 150, 450)
   return strength * Math.exp(-(msSinceBeat - attack) / tau)
@@ -148,4 +151,82 @@ export function bassBrightness(
   const peak = Math.min(100, Math.max(baseLevel, 60) + d * (100 - baseLevel))
   const bassDrive = clamp(low * 0.75 + pulse * 0.25, 0, 1)
   return clamp(lerp(floor, peak, bassDrive), 1, 100)
+}
+
+export type MusicStyle = 'smooth' | 'party' | 'bass'
+
+/**
+ * Continuous temporal smoother for music lighting.
+ * Smooths brightness rises and falls along organic exponential curves, rate-limits
+ * single-frame brightness rises so FlashGuard never clamps or stair-steps, and
+ * glides hue along the shortest arc so color transitions are gradual and unnoticeable.
+ */
+export class MusicSmoother {
+  private currentBri: number | null = null
+  private currentH: number | null = null
+  private currentS: number | null = null
+  private lastAt = 0
+
+  public update(
+    target: { h: number; s: number; brightness: number },
+    now: number,
+    style: MusicStyle = 'smooth'
+  ): { h: number; s: number; brightness: number } {
+    if (this.currentBri === null || this.lastAt === 0) {
+      this.currentBri = target.brightness
+      this.currentH = target.h
+      this.currentS = target.s
+      this.lastAt = now
+      return target
+    }
+    const dt = Math.max(0, Math.min(1.0, (now - this.lastAt) / 1000))
+    this.lastAt = now
+    if (dt === 0) {
+      return {
+        h: Math.round(this.currentH!),
+        s: Math.round(this.currentS!),
+        brightness: Math.round(this.currentBri)
+      }
+    }
+
+    const isRising = target.brightness > this.currentBri
+
+    if (style === 'party') {
+      this.currentBri = target.brightness
+    } else {
+      // Style-adapted time constants:
+      // Smooth: gentle organic rise, analogue decay
+      // Bass: rolling, deep sub-bass inertia
+      const tauBri = style === 'bass' ? (isRising ? 0.14 : 0.35) : (isRising ? 0.10 : 0.26)
+      const aBri = 1 - Math.exp(-dt / tauBri)
+      const rawBri = lerp(this.currentBri, target.brightness, aBri)
+
+      // Rate-limit the single-frame rise strictly below FLASH_RISE_THRESHOLD (25 points).
+      // This guarantees FlashGuard never clips, preventing 24-point staircase stepping.
+      const maxRise = FLASH_RISE_THRESHOLD - 1
+      this.currentBri = isRising ? Math.min(this.currentBri + maxRise, rawBri) : rawBri
+    }
+
+    // Smooth hue along shortest arc so color changes are gradual and unnoticeable
+    const tauHue = style === 'party' ? 0.18 : 0.26
+    const aHue = 1 - Math.exp(-dt / tauHue)
+    this.currentH = lerpHue(this.currentH!, target.h, aHue)
+
+    // Smooth saturation
+    const aSat = 1 - Math.exp(-dt / 0.24)
+    this.currentS = lerp(this.currentS!, target.s, aSat)
+
+    return {
+      h: Math.round(((this.currentH % 360) + 360) % 360),
+      s: Math.round(clamp(this.currentS, 0, 100)),
+      brightness: Math.round(clamp(this.currentBri, 1, 100))
+    }
+  }
+
+  public reset(): void {
+    this.currentBri = null
+    this.currentH = null
+    this.currentS = null
+    this.lastAt = 0
+  }
 }

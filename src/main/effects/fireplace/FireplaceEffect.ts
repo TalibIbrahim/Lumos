@@ -4,7 +4,7 @@ import { LightOutput, asAdjustable, luminance } from '../output'
 import { asObj, bool, int, targets } from '../validate'
 import type { MusicFeatures } from '../../../shared/audio/analysis'
 import type { MusicSource } from '../music/capture'
-import { flameFlicker, fireplaceOutput } from './fireLogic'
+import { flameFlicker, fireplaceOutput, FireSmoother } from './fireLogic'
 
 export interface FireplaceSettings extends EffectSettingsBase {
   /** Maximum flame brightness intensity (10..100, default 80). */
@@ -34,6 +34,7 @@ export class FireplaceEffect extends Effect<FireplaceSettings> implements Layer 
 
   private source: MusicSource | null = null
   private audioEnergy = 0
+  private smoothers = new Map<string, FireSmoother>()
 
   constructor(
     host: EffectHost,
@@ -69,6 +70,7 @@ export class FireplaceEffect extends Effect<FireplaceSettings> implements Layer 
 
   protected onStart(): void {
     this.audioEnergy = 0
+    this.smoothers.clear()
     if (this.settings.acoustic) {
       this.startAudioSource()
     }
@@ -79,6 +81,7 @@ export class FireplaceEffect extends Effect<FireplaceSettings> implements Layer 
 
   protected onStop(): void {
     this.stopAudioSource()
+    this.smoothers.clear()
     this.host.compositor.removeLayer(this.id, FADE_MS)
   }
 
@@ -87,7 +90,7 @@ export class FireplaceEffect extends Effect<FireplaceSettings> implements Layer 
       if (this.settings.acoustic) this.startAudioSource()
       else this.stopAudioSource()
     }
-    this.host.compositor.invalidate(this.targetIds())
+    this.host.compositor.invalidate(this.targetIds(), 600)
     this.host.compositor.wake()
   }
 
@@ -151,15 +154,26 @@ export class FireplaceEffect extends Effect<FireplaceSettings> implements Layer 
       this.settings.intensity
     )
 
-    const brightness = ctx.reduceIntensity ? Math.min(flame.brightness, 60) : flame.brightness
+    const targetBrightness = ctx.reduceIntensity ? Math.min(flame.brightness, 60) : flame.brightness
+
+    let smoother = this.smoothers.get(ctx.lightId)
+    if (!smoother) {
+      smoother = new FireSmoother()
+      this.smoothers.set(ctx.lightId, smoother)
+    }
+
+    const smoothed = smoother.update(
+      { h: flame.h, s: flame.s, brightness: targetBrightness },
+      ctx.now
+    )
 
     return {
       ...asAdjustable(below),
       power: true,
       mode: 'colour',
-      h: flame.h,
-      s: flame.s,
-      brightness
+      h: smoothed.h,
+      s: smoothed.s,
+      brightness: smoothed.brightness
     }
   }
 }
