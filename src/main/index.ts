@@ -23,6 +23,9 @@ if (process.platform === 'win32') {
   app.setAppUserModelId('com.lumos.app')
 }
 
+// Single-instance lock: ensure only one instance of Lumos runs at a time
+const gotTheLock = app.requestSingleInstanceLock()
+
 let mainWindow: BrowserWindow | null = null
 let lightManager: LightManager | null = null
 let effectManager: EffectManager | null = null
@@ -30,6 +33,22 @@ let energyTracker: EnergyTracker | null = null
 let remoteManager: RemoteManager | null = null
 let isQuitting = false
 let cleanupDone = false
+let pendingShowOnReady = false
+
+function showAndFocusMainWindow(): void {
+  if (!mainWindow) {
+    pendingShowOnReady = true
+    return
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+  if (!mainWindow.isVisible()) {
+    mainWindow.show()
+  }
+  mainWindow.show()
+  mainWindow.focus()
+}
 
 /**
  * Last line of defence: a stray error from a network library (for example a
@@ -79,7 +98,7 @@ function createWindow(startHidden = false): BrowserWindow {
   })
 
   mainWindow.on('ready-to-show', () => {
-    if (mainWindow && !startHidden) {
+    if (mainWindow && (!startHidden || pendingShowOnReady)) {
       mainWindow.show()
     }
   })
@@ -109,7 +128,15 @@ function createWindow(startHidden = false): BrowserWindow {
   return mainWindow
 }
 
-app.whenReady().then(async () => {
+if (!gotTheLock) {
+  app.quit()
+} else {
+  app.on('second-instance', (_event, commandLine) => {
+    if (commandLine.includes('--hidden')) return
+    showAndFocusMainWindow()
+  })
+
+  app.whenReady().then(async () => {
   // Step 0: Migrate legacy data from Lumen if present
   migrateLegacyData()
 
@@ -208,7 +235,7 @@ app.whenReady().then(async () => {
   webhookServer.start(lightManager)
 
   // Create Window & Tray FIRST so the application window appears immediately
-  const win = createWindow(isStartHidden)
+  const win = createWindow(isStartHidden && !pendingShowOnReady)
   createTray(win, lightManager)
 
   // Initialize devices, restore states, and publish HomeKit bridge in parallel background tasks
@@ -247,8 +274,8 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
-    } else if (mainWindow) {
-      mainWindow.show()
+    } else {
+      showAndFocusMainWindow()
     }
   })
 })
@@ -292,3 +319,4 @@ app.on('window-all-closed', () => {
     app.quit()
   }
 })
+}

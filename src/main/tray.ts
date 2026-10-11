@@ -86,9 +86,13 @@ export function createTray(mainWindow: BrowserWindow, lightManager: LightManager
       {
         label: 'Show Lumos',
         click: (): void => {
+          if (mainWindow.isMinimized()) {
+            mainWindow.restore()
+          }
           if (!mainWindow.isVisible()) {
             mainWindow.show()
           }
+          mainWindow.show()
           mainWindow.focus()
         }
       },
@@ -127,7 +131,10 @@ export function createTray(mainWindow: BrowserWindow, lightManager: LightManager
 
   const toggleWindow = (): void => {
     if (mainWindow.isVisible()) {
-      if (mainWindow.isFocused()) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore()
+        mainWindow.focus()
+      } else if (mainWindow.isFocused()) {
         mainWindow.hide()
       } else {
         mainWindow.focus()
