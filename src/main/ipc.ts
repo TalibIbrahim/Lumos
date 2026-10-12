@@ -318,6 +318,10 @@ export function setupIPC(
     return homeKitManager.getHomeKitInfo()
   })
 
+  handle('reload-homekit', async () => {
+    return homeKitManager.reloadBridge()
+  })
+
   handle('reset-homekit', async () => {
     return homeKitManager.resetHomeKit()
   })

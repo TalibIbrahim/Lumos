@@ -5,8 +5,10 @@ import {
   lumosColorTempToMireds,
   miredsToLumosColorTemp,
   detectLanInterfaces,
+  getLanInterfaceFingerprint,
   checkPortAvailable,
-  findAvailablePort
+  findAvailablePort,
+  homeKitManager
 } from '../main/homekit'
 
 describe('HomeKit Utilities', () => {
@@ -140,6 +142,100 @@ describe('HomeKit Utilities', () => {
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()))
       }
+    })
+  })
+
+  describe('getLanInterfaceFingerprint', () => {
+    it('produces a sorted, colon/semicolon-separated string of LAN IP bindings', () => {
+      const original = os.networkInterfaces
+      try {
+        os.networkInterfaces = () => ({
+          'Ethernet': [
+            { address: '192.168.1.20', netmask: '255.255.255.0', family: 'IPv4', mac: '00:11:22:33:44:55', internal: false, cidr: '192.168.1.20/24' }
+          ],
+          'Local Area Connection* 10': [
+            { address: '192.168.137.1', netmask: '255.255.255.0', family: 'IPv4', mac: '00:11:22:33:44:66', internal: false, cidr: '192.168.137.1/24' }
+          ],
+          'vEthernet (Default Switch)': [
+            { address: '172.19.240.1', netmask: '255.255.240.0', family: 'IPv4', mac: '00:15:5d:00:00:01', internal: false, cidr: '172.19.240.1/20' }
+          ]
+        })
+
+        const fp = getLanInterfaceFingerprint()
+        expect(fp).toBe('Ethernet:192.168.1.20;Local Area Connection* 10:192.168.137.1')
+      } finally {
+        os.networkInterfaces = original
+      }
+    })
+
+    it('changes when mobile hotspot interface is added', () => {
+      const original = os.networkInterfaces
+      try {
+        os.networkInterfaces = () => ({
+          'Ethernet': [
+            { address: '192.168.1.20', netmask: '255.255.255.0', family: 'IPv4', mac: '00:11:22:33:44:55', internal: false, cidr: '192.168.1.20/24' }
+          ]
+        })
+        const before = getLanInterfaceFingerprint()
+
+        os.networkInterfaces = () => ({
+          'Ethernet': [
+            { address: '192.168.1.20', netmask: '255.255.255.0', family: 'IPv4', mac: '00:11:22:33:44:55', internal: false, cidr: '192.168.1.20/24' }
+          ],
+          'Local Area Connection* 10': [
+            { address: '192.168.137.1', netmask: '255.255.255.0', family: 'IPv4', mac: '00:11:22:33:44:66', internal: false, cidr: '192.168.137.1/24' }
+          ]
+        })
+        const after = getLanInterfaceFingerprint()
+
+        expect(before).not.toBe(after)
+        expect(after).toContain('192.168.137.1')
+      } finally {
+        os.networkInterfaces = original
+      }
+    })
+  })
+
+  describe('HomeKitManager Lifecycle & Reload', () => {
+    it('exposes reloadBridge, startNetworkMonitor, and stopNetworkMonitor methods', () => {
+      expect(typeof homeKitManager.reloadBridge).toBe('function')
+      expect(typeof (homeKitManager as any).startNetworkMonitor).toBe('function')
+      expect(typeof (homeKitManager as any).stopNetworkMonitor).toBe('function')
+    })
+
+    it('reloadBridge returns info gracefully without error even when lightManager is absent', async () => {
+      const info = await homeKitManager.reloadBridge()
+      expect(info).toBeDefined()
+      expect(typeof info.isPaired).toBe('boolean')
+    })
+
+    it('startNetworkMonitor sets interval and records lastNetworkFingerprint', () => {
+      const original = os.networkInterfaces
+      try {
+        os.networkInterfaces = () => ({
+          'Ethernet': [
+            { address: '192.168.1.55', netmask: '255.255.255.0', family: 'IPv4', mac: '00:11:22:33:44:55', internal: false, cidr: '192.168.1.55/24' }
+          ]
+        })
+        const mgr = homeKitManager as any
+        mgr.startNetworkMonitor()
+        expect(mgr.networkMonitorInterval).not.toBeNull()
+        expect(mgr.lastNetworkFingerprint).toBe('Ethernet:192.168.1.55')
+      } finally {
+        os.networkInterfaces = original
+        ;(homeKitManager as any).stopNetworkMonitor()
+      }
+    })
+
+    it('stopNetworkMonitor and stop() clear timers cleanly', () => {
+      const mgr = homeKitManager as any
+      mgr.startNetworkMonitor()
+      expect(mgr.networkMonitorInterval).not.toBeNull()
+
+      homeKitManager.stop()
+      expect(mgr.networkMonitorInterval).toBeNull()
+      expect(mgr.networkDebounceTimer).toBeNull()
+      expect(mgr.isInitialized).toBe(false)
     })
   })
 })

@@ -96,8 +96,17 @@ export function checkPortAvailable(port, host = '0.0.0.0') {
  * Scans sequential HAP range (51826-51850), then falls back to OS-assigned ephemeral port.
  */
 export async function findAvailablePort(preferredPort = 51826, host = '0.0.0.0') {
-  if (preferredPort && (await checkPortAvailable(preferredPort, host))) {
-    return preferredPort
+  if (preferredPort) {
+    if (await checkPortAvailable(preferredPort, host)) {
+      return preferredPort
+    }
+    // Sockets in TIME_WAIT may take a moment to release after unpublishing
+    for (let retry = 0; retry < 3; retry++) {
+      await new Promise((r) => setTimeout(r, 200))
+      if (await checkPortAvailable(preferredPort, host)) {
+        return preferredPort
+      }
+    }
   }
   const start = 51826
   for (let p = start; p <= 51850; p++) {
@@ -159,6 +168,48 @@ export function detectLanInterfaces() {
 }
 
 /**
+ * Produces a stable fingerprint of active LAN interfaces and their IPv4 addresses.
+ * Changes when adapters come online/offline (e.g. mobile hotspot enabled) or IP changes.
+ */
+export function getLanInterfaceFingerprint() {
+  const ifaces = os.networkInterfaces()
+  const entries = []
+  for (const [name, list] of Object.entries(ifaces)) {
+    if (!list) continue
+    const lower = name.toLowerCase()
+    if (
+      lower.includes('vethernet') ||
+      lower.includes('virtualbox') ||
+      lower.includes('vbox') ||
+      lower.includes('vmware') ||
+      lower.includes('vmnet') ||
+      lower.includes('loopback') ||
+      lower.includes('bluetooth') ||
+      lower.includes('wsl') ||
+      lower.includes('pseudo') ||
+      lower.includes('teredo') ||
+      lower.includes('isatap') ||
+      lower.includes('docker') ||
+      lower.includes('cni')
+    ) {
+      continue
+    }
+    for (const info of list) {
+      const isIpv4 = info.family === 'IPv4' || info.family === 4
+      if (
+        !info.internal &&
+        isIpv4 &&
+        !info.address.startsWith('169.254.') &&
+        !info.address.startsWith('127.')
+      ) {
+        entries.push(`${name}:${info.address}`)
+      }
+    }
+  }
+  return entries.sort().join(';')
+}
+
+/**
  * Maps Lumos colorTemp (0-100, warm amber to cool daylight)
  * to HomeKit mireds (500-140, warm amber to cool daylight).
  */
@@ -215,6 +266,10 @@ export class HomeKitManager {
     this.storageInitialized = false
     this.storagePath = ''
     this.configFile = ''
+    this.isReloading = false
+    this.lastNetworkFingerprint = ''
+    this.networkMonitorInterval = null
+    this.networkDebounceTimer = null
   }
 
   setupStorage() {
@@ -291,6 +346,7 @@ export class HomeKitManager {
     this.config = await this.loadOrCreateConfig()
 
     await this.publishBridge()
+    this.startNetworkMonitor()
     this.isInitialized = true
   }
 
@@ -685,8 +741,93 @@ export class HomeKitManager {
     }
   }
 
+  async reloadBridge() {
+    if (this.isReloading || !this.lightManager) {
+      return this.getHomeKitInfo()
+    }
+    this.isReloading = true
+    console.log('[Lumos HomeKit] Reloading HomeKit bridge on current network (preserving pairing and accessories)...')
+
+    try {
+      // 1. Unpublish and destroy existing bridge
+      if (this.bridge) {
+        try {
+          await this.bridge.unpublish()
+          await this.bridge.destroy()
+        } catch (err) {
+          console.warn('[Lumos HomeKit] Error unpublishing bridge during reload:', err)
+        }
+        this.bridge = null
+      }
+
+      // 2. Clean up light event listeners
+      for (const acc of this.accessories) {
+        const cleanup = acc._cleanUpListener
+        if (typeof cleanup === 'function') {
+          cleanup()
+        }
+      }
+      this.accessories = []
+
+      // 3. Wait briefly for closing sockets to finish releasing ports
+      await new Promise((resolve) => setTimeout(resolve, 300))
+
+      // 4. Update the stored network fingerprint
+      this.lastNetworkFingerprint = getLanInterfaceFingerprint()
+
+      // 5. Rebuild and publish bridge with EXISTING config and HAP storage (pairing preserved!)
+      await this.publishBridge()
+      this.isInitialized = true
+      console.log('[Lumos HomeKit] Bridge re-published successfully on LAN with existing pairing.')
+    } catch (err) {
+      console.error('[Lumos HomeKit] Error reloading bridge:', err)
+    } finally {
+      this.isReloading = false
+    }
+
+    return this.getHomeKitInfo()
+  }
+
+  startNetworkMonitor() {
+    this.stopNetworkMonitor()
+    this.lastNetworkFingerprint = getLanInterfaceFingerprint()
+
+    this.networkMonitorInterval = setInterval(() => {
+      if (!this.isInitialized || !this.lightManager || this.isReloading) return
+
+      const currentFingerprint = getLanInterfaceFingerprint()
+      if (currentFingerprint && currentFingerprint !== this.lastNetworkFingerprint) {
+        console.log(
+          `[Lumos HomeKit] Network change detected (${this.lastNetworkFingerprint || 'none'} -> ${currentFingerprint || 'none'}). Re-announcing bridge...`
+        )
+        this.lastNetworkFingerprint = currentFingerprint
+
+        if (this.networkDebounceTimer) clearTimeout(this.networkDebounceTimer)
+        this.networkDebounceTimer = setTimeout(async () => {
+          try {
+            await this.reloadBridge()
+          } catch (err) {
+            console.error('[Lumos HomeKit] Auto-reload failed after network change:', err)
+          }
+        }, 1500)
+      }
+    }, 5000)
+  }
+
+  stopNetworkMonitor() {
+    if (this.networkMonitorInterval) {
+      clearInterval(this.networkMonitorInterval)
+      this.networkMonitorInterval = null
+    }
+    if (this.networkDebounceTimer) {
+      clearTimeout(this.networkDebounceTimer)
+      this.networkDebounceTimer = null
+    }
+  }
+
   async resetHomeKit() {
     console.log('[Lumos HomeKit] Resetting HomeKit pairing and HAP storage...')
+    this.stopNetworkMonitor()
 
     // 1. Unpublish and destroy existing bridge
     if (this.bridge) {
@@ -748,11 +889,13 @@ export class HomeKitManager {
 
     // 6. Rebuild and re-publish bridge
     await this.publishBridge()
+    this.startNetworkMonitor()
 
     return this.getHomeKitInfo()
   }
 
   stop() {
+    this.stopNetworkMonitor()
     if (this.bridge) {
       try {
         console.log('[Lumos HomeKit] Unpublishing bridge on app shutdown...')

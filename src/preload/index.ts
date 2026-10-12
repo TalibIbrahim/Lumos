@@ -92,6 +92,7 @@ export interface LumosAPI {
 
   // HomeKit & Webhook
   getHomeKitInfo: () => Promise<HomeKitInfo>
+  reloadHomeKit: () => Promise<HomeKitInfo>
   resetHomeKit: () => Promise<HomeKitInfo>
   getWebhookInfo: () => Promise<WebhookInfo>
 
@@ -229,6 +230,7 @@ const api: LumosAPI = {
     ipcRenderer.invoke('save-sunrise-alarm', alarm),
 
   getHomeKitInfo: (): Promise<HomeKitInfo> => ipcRenderer.invoke('get-homekit-info'),
+  reloadHomeKit: (): Promise<HomeKitInfo> => ipcRenderer.invoke('reload-homekit'),
   resetHomeKit: (): Promise<HomeKitInfo> => ipcRenderer.invoke('reset-homekit'),
   getWebhookInfo: (): Promise<WebhookInfo> => ipcRenderer.invoke('get-webhook-info'),
 

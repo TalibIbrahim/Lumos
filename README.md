@@ -197,6 +197,7 @@ Lumos includes an integrated HomeKit bridge that exposes your local fixtures as 
 ### Requirements & Network Notes
 - **Firewall**: When prompted by Windows Defender Firewall, allow Lumos network access on Private networks.
 - **Subnet**: Your PC and iOS device must be connected to the same local Wi-Fi subnet for mDNS discovery.
+- **Network Changes & Mobile Hotspots**: Lumos continuously monitors network adapters. If your network changes (for example, switching to a Mobile Hotspot after a power outage), Lumos automatically re-announces the bridge on the new interface while preserving all pairings, light accessories, and rooms. You can also click **Restart Bridge** in Settings to re-broadcast on the current network without losing pairings.
 - **Remote Access**: Controlling accessories outside your home network or executing time-based HomeKit automations requires an Apple Home Hub (Apple TV or HomePod) on your network.
 
 ---
@@ -542,6 +543,7 @@ From then on, the second computer stops connecting to the lights itself. Its lig
 ### HomeKit Accessory Not Discovered
 - Check that Windows Defender Firewall is not blocking the HomeKit bridge ports (51826–51850) or mDNS UDP port 5353. If port 51826 is reserved by Windows (Hyper-V / WinNAT), Lumos automatically selects the next available port in this range.
 - Verify that your PC and iOS device are connected to the same subnet/VLAN without client isolation enabled, or that your iOS device is connected to the PC's Mobile Hotspot network.
+- If lights show "No Response" after enabling Mobile Hotspot or switching networks, click **Restart Bridge** in Settings (or wait a few seconds for auto-detection) to re-announce the bridge on the active network. Avoid clicking "Reset Pairing", which deletes the pairing and requires re-scanning.
 
 ---
 

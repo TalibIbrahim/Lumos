@@ -54,6 +54,8 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, o
   const [showQrCode, setShowQrCode] = useState(false)
   const [confirmingReset, setConfirmingReset] = useState(false)
   const [resetting, setResetting] = useState(false)
+  const [reloadingBridge, setReloadingBridge] = useState(false)
+  const [reloadSuccess, setReloadSuccess] = useState(false)
   const [flashing, setFlashing] = useState(false)
   const [importMessage, setImportMessage] = useState<string | null>(null)
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ state: 'idle' })
@@ -154,6 +156,23 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, o
     } catch (err) {
       console.error('[SettingsSheet] Error updating launch setting:', err)
       setLaunchAtLogin(!nextVal)
+    }
+  }
+
+  const handleReloadHomeKit = async (): Promise<void> => {
+    const api = window.lumos || window.lumen
+    if (!api || !api.reloadHomeKit || reloadingBridge) return
+    setReloadingBridge(true)
+    setReloadSuccess(false)
+    try {
+      const updated = await api.reloadHomeKit()
+      setHkInfo(updated)
+      setReloadSuccess(true)
+      setTimeout(() => setReloadSuccess(false), 3000)
+    } catch (err) {
+      console.error('[SettingsSheet] Error restarting HomeKit bridge:', err)
+    } finally {
+      setReloadingBridge(false)
     }
   }
 
@@ -442,47 +461,68 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, o
                             )}
                           </AnimatePresence>
 
-                          {/* Reset Bridge Row */}
-                          <div className="pt-1 flex items-center justify-between border-t border-white/[0.06]">
+                          {/* Bridge Actions Row */}
+                          <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-t border-white/[0.06]">
                             <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-                              <Info className="w-3.5 h-3.5" />
+                              <Info className="w-3.5 h-3.5 flex-shrink-0" />
                               <span>Bridge ID: {hkInfo.bridgeUsername}</span>
+                              {reloadSuccess && (
+                                <span className="text-emerald-400 font-medium ml-1">· Re-announced on LAN</span>
+                              )}
                             </div>
 
-                            {confirmingReset ? (
-                              <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2">
+                              <GlassButton
+                                variant="standard"
+                                size="sm"
+                                onClick={handleReloadHomeKit}
+                                disabled={reloadingBridge || resetting}
+                                title="Re-announces the bridge on your current Wi-Fi/Hotspot network without losing paired lights or rooms"
+                              >
+                                {reloadingBridge ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                )}
+                                <span>Restart Bridge</span>
+                              </GlassButton>
+
+                              {confirmingReset ? (
+                                <div className="flex items-center gap-2">
+                                  <GlassButton
+                                    variant="subtle"
+                                    size="sm"
+                                    onClick={() => setConfirmingReset(false)}
+                                    disabled={resetting}
+                                  >
+                                    Cancel
+                                  </GlassButton>
+                                  <GlassButton
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={handleResetHomeKit}
+                                    disabled={resetting}
+                                  >
+                                    {resetting ? (
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <AlertTriangle className="w-3.5 h-3.5" />
+                                    )}
+                                    <span>Confirm Reset</span>
+                                  </GlassButton>
+                                </div>
+                              ) : (
                                 <GlassButton
                                   variant="subtle"
                                   size="sm"
-                                  onClick={() => setConfirmingReset(false)}
-                                  disabled={resetting}
+                                  onClick={() => setConfirmingReset(true)}
+                                  title="Unpairs and clears bridge setup. Requires re-scanning the QR code in Apple Home."
                                 >
-                                  Cancel
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  <span>Reset Pairing</span>
                                 </GlassButton>
-                                <GlassButton
-                                  variant="destructive"
-                                  size="sm"
-                                  onClick={handleResetHomeKit}
-                                  disabled={resetting}
-                                >
-                                  {resetting ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <AlertTriangle className="w-3.5 h-3.5" />
-                                  )}
-                                  <span>Confirm Reset</span>
-                                </GlassButton>
-                              </div>
-                            ) : (
-                              <GlassButton
-                                variant="destructive"
-                                size="sm"
-                                onClick={() => setConfirmingReset(true)}
-                              >
-                                <RotateCcw className="w-3.5 h-3.5" />
-                                <span>Reset Bridge</span>
-                              </GlassButton>
-                            )}
+                              )}
+                            </div>
                           </div>
                         </>
                       ) : null}
