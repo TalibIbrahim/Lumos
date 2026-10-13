@@ -6,6 +6,7 @@ import os from 'os'
 import net from 'net'
 import util from 'util'
 import debug from 'debug'
+import { writeFileAtomic } from './atomicWrite'
 
 // Enable diagnostic logging for HAP-NodeJS and Ciao
 process.env.DEBUG = process.env.DEBUG || 'HAP-NodeJS*,@homebridge/ciao*'
@@ -326,7 +327,7 @@ export class HomeKitManager {
     }
 
     try {
-      fs.writeFileSync(this.configFile, JSON.stringify(config, null, 2), 'utf-8')
+      writeFileAtomic(this.configFile, JSON.stringify(config, null, 2))
     } catch (err) {
       console.error('[Lumos HomeKit] Failed to save bridge config:', err)
     }
@@ -622,7 +623,7 @@ export class HomeKitManager {
       console.log(`[Lumos HomeKit] Switching bridge port from ${this.config.port} to ${safePort}`)
       this.config.port = safePort
       try {
-        fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2), 'utf-8')
+        writeFileAtomic(this.configFile, JSON.stringify(this.config, null, 2))
       } catch {}
     }
 
@@ -690,7 +691,7 @@ export class HomeKitManager {
         console.log(`[Lumos HomeKit] Retrying publish on alternative port ${altPort}...`)
         this.config.port = altPort
         try {
-          fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2), 'utf-8')
+          writeFileAtomic(this.configFile, JSON.stringify(this.config, null, 2))
         } catch {}
         await this.bridge.publish({
           username: this.config.username,
@@ -749,14 +750,16 @@ export class HomeKitManager {
     console.log('[Lumos HomeKit] Reloading HomeKit bridge on current network (preserving pairing and accessories)...')
 
     try {
-      // 1. Unpublish and destroy existing bridge
+      // 1. Unpublish existing bridge (do not destroy, to preserve HAP pairing and identity keys)
       if (this.bridge) {
         try {
           await this.bridge.unpublish()
-          await this.bridge.destroy()
         } catch (err) {
           console.warn('[Lumos HomeKit] Error unpublishing bridge during reload:', err)
         }
+        try {
+          this.bridge.removeAllListeners()
+        } catch {}
         this.bridge = null
       }
 
@@ -796,9 +799,19 @@ export class HomeKitManager {
       if (!this.isInitialized || !this.lightManager || this.isReloading) return
 
       const currentFingerprint = getLanInterfaceFingerprint()
-      if (currentFingerprint && currentFingerprint !== this.lastNetworkFingerprint) {
+      if (!currentFingerprint) {
+        if (this.lastNetworkFingerprint) {
+          console.log(
+            `[Lumos HomeKit] LAN interface disconnected (was ${this.lastNetworkFingerprint}). Waiting for network...`
+          )
+          this.lastNetworkFingerprint = ''
+        }
+        return
+      }
+
+      if (currentFingerprint !== this.lastNetworkFingerprint) {
         console.log(
-          `[Lumos HomeKit] Network change detected (${this.lastNetworkFingerprint || 'none'} -> ${currentFingerprint || 'none'}). Re-announcing bridge...`
+          `[Lumos HomeKit] Network change detected (${this.lastNetworkFingerprint || 'none'} -> ${currentFingerprint}). Re-announcing bridge...`
         )
         this.lastNetworkFingerprint = currentFingerprint
 
@@ -882,7 +895,7 @@ export class HomeKitManager {
     }
 
     try {
-      fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2), 'utf-8')
+      writeFileAtomic(this.configFile, JSON.stringify(this.config, null, 2))
     } catch (err) {
       console.error('[Lumos HomeKit] Failed saving updated bridge config:', err)
     }

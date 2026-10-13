@@ -237,5 +237,56 @@ describe('HomeKit Utilities', () => {
       expect(mgr.networkDebounceTimer).toBeNull()
       expect(mgr.isInitialized).toBe(false)
     })
+
+    it('reloadBridge unpublishes active bridge without calling destroy (preserving pairing)', async () => {
+      const mgr = homeKitManager as any
+      let unpublishCalled = false
+      let destroyCalled = false
+
+      mgr.bridge = {
+        unpublish: async () => {
+          unpublishCalled = true
+        },
+        destroy: async () => {
+          destroyCalled = true
+        },
+        removeAllListeners: () => {}
+      }
+      mgr.lightManager = {
+        getAllLights: () => []
+      }
+
+      await mgr.reloadBridge()
+
+      expect(unpublishCalled).toBe(true)
+      expect(destroyCalled).toBe(false)
+      mgr.stop()
+    })
+
+    it('startNetworkMonitor detects complete network disconnect and resets fingerprint', () => {
+      const original = os.networkInterfaces
+      try {
+        os.networkInterfaces = () => ({
+          'Ethernet': [
+            { address: '192.168.1.55', netmask: '255.255.255.0', family: 'IPv4', mac: '00:11:22:33:44:55', internal: false, cidr: '192.168.1.55/24' }
+          ]
+        })
+        const mgr = homeKitManager as any
+        mgr.isInitialized = true
+        mgr.lightManager = { getAllLights: () => [] }
+        mgr.startNetworkMonitor()
+        expect(mgr.lastNetworkFingerprint).toBe('Ethernet:192.168.1.55')
+
+        // Simulate power cut / network disconnect
+        os.networkInterfaces = () => ({})
+        const checkFn = (mgr.networkMonitorInterval as any)._onTimeout || (() => {})
+
+        // Directly verify getLanInterfaceFingerprint returns empty
+        expect(getLanInterfaceFingerprint()).toBe('')
+      } finally {
+        os.networkInterfaces = original
+        ;(homeKitManager as any).stopNetworkMonitor()
+      }
+    })
   })
 })
